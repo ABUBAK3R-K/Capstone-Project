@@ -1,0 +1,42 @@
+name: mobile
+description: A new Flutter project.
+
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Supabase client for DB and Auth
+  supabase_flutter: ^2.5.0
+  # For loading .env variables safely
+  flutter_dotenv: ^5.1.0
+  # Maps integration (OpenStreetMap)
+  flutter_map: ^6.1.0
+  latlong2: ^0.9.0
+  # Geolocation for centering map
+  geolocator: ^11.0.0
+  # State management / Dependency Injection
+  provider: ^6.1.2
+
+  # The following adds the Cupertino Icons font to your application.
+  # Use with the CupertinoIcons class for iOS style icons.
+  cupertino_icons: ^1.0.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+
+  # To add assets to your application, add an assets section
+  assets:
+    - .env
