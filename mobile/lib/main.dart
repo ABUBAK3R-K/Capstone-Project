@@ -1,5 +1,3 @@
-import 'package:flutter/material.flutter'; // wait, it's package:flutter/material.dart
-# Actually let me just write the correct dart code:
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';

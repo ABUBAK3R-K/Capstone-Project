@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'home_screen.dart';
 import 'map_screen.dart';
-import 'report_screen.dart';
+import '../features/report/report_screen.dart';
 import 'profile_screen.dart';
 
 class MainNavigation extends StatefulWidget {
