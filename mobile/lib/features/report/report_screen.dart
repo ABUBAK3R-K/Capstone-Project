@@ -135,13 +135,16 @@ class _ReportScreenState extends State<ReportScreen> {
       // 2. Insert into problem_reports
       final supabase = Supabase.instance.client;
       final userId = supabase.auth.currentUser!.id;
-      final locationString = 'POINT(${_location!.longitude} ${_location!.latitude})';
+      final locationGeoJson = {
+        'type': 'Point',
+        'coordinates': [_location!.longitude, _location!.latitude]
+      };
 
       await supabase.from('problem_reports').insert({
         'user_id': userId,
         'photo_url': imageUrl,
         'category': _selectedCategory,
-        'location': locationString,
+        'location': locationGeoJson,
         'description': _descriptionController.text.trim(),
         'status': 'reported'
       });
