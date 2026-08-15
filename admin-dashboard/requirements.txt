@@ -4,3 +4,4 @@ psycopg2-binary>=2.9.9
 folium>=0.15.1
 streamlit-folium>=0.18.0
 python-dotenv>=1.0.1
+supabase>=2.3.4
