@@ -1,11 +1,7 @@
-// Dummy models for now, pending real API integration
-class Place {
-  final String id;
-  final String name;
-  final String category;
-  Place({required this.id, required this.name, required this.category});
-}
+import 'package:supabase_flutter/supabase_flutter.dart';
+import '../models/place.dart';
 
+// We'll keep Problem here temporarily as a dummy until we wire it up fully
 class Problem {
   final String id;
   final String title;
@@ -14,22 +10,40 @@ class Problem {
 }
 
 class PlacesService {
-  // Later we'll inject Supabase client here and query real Postgres tables
+  final _supabase = Supabase.instance.client;
   
-  Future<List<String>> getCategories() async {
-    await Future.delayed(const Duration(milliseconds: 500));
-    return ['Restaurants', 'Shops', 'Religious', 'Public Parks'];
+  /// Fetches real nearby places from the PostGIS database via Supabase RPC
+  Future<List<Place>> getNearbyPlaces(double lat, double lng, {int radius = 5000, String? category}) async {
+    try {
+      final response = await _supabase.rpc('nearby_places', params: {
+        'lat': lat,
+        'lng': lng,
+        'radius_meters': radius,
+        'filter_category': category,
+      });
+
+      final List<dynamic> data = response as List<dynamic>;
+      return data.map((json) => Place.fromJson(json)).toList();
+    } catch (e) {
+      print('Error fetching nearby places: $e');
+      return [];
+    }
   }
 
-  Future<List<Place>> getRecentPlaces() async {
-    await Future.delayed(const Duration(milliseconds: 500));
-    return [
-      Place(id: '1', name: 'Downtown Cafe', category: 'Restaurants'),
-      Place(id: '2', name: 'Central Park', category: 'Public Parks'),
-      Place(id: '3', name: 'Local Grocer', category: 'Shops'),
-    ];
+  /// Extracts unique categories from the nearby places
+  Future<List<String>> getCategories(double lat, double lng) async {
+    final places = await getNearbyPlaces(lat, lng);
+    final categories = places.map((p) => p.category).toSet().toList();
+    return categories.isNotEmpty ? categories : ['Shops', 'Religious', 'Public Parks'];
   }
 
+  /// Fetches a small list of recent places for the home screen
+  Future<List<Place>> getRecentPlaces(double lat, double lng) async {
+    final places = await getNearbyPlaces(lat, lng, radius: 10000);
+    return places.take(5).toList();
+  }
+
+  // Still dummy for now
   Future<List<Problem>> getNearbyProblems() async {
     await Future.delayed(const Duration(milliseconds: 500));
     return [
