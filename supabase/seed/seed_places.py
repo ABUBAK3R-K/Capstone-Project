@@ -104,10 +104,9 @@ def seed_supabase(osm_data):
             print(f"Error inserting batch: {e}")
 
 if __name__ == "__main__":
-    # Default bounding box for a small test area (e.g., Central London)
-    # Get your own bbox from http://bboxfinder.com/ (Format: minLat, minLon, maxLat, maxLon)
-    # Warning: bboxfinder uses (lng, lat). Overpass expects (south, west, north, east)
-    BBOX = "51.5000,-0.1300,51.5200,-0.1000" 
+    # Example: Central Bengaluru, India
+    # Format: minLat, minLon, maxLat, maxLon (South, West, North, East)
+    BBOX = "12.9500,77.5700,12.9900,77.6100" 
     
     try:
         data = fetch_osm_data(BBOX)
