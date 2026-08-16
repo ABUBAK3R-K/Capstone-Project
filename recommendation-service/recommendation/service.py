@@ -2,11 +2,11 @@ import numpy as np
 from sqlalchemy.orm import Session
 from .strategy import RecommendationStrategy
 
+
 class RecommendationService:
     def __init__(self, strategy: RecommendationStrategy):
         """
         Initializes the service with a specific recommendation strategy.
-        In Phase 1, this will be ContentProximityStrategy.
         """
         self.strategy = strategy
         
@@ -14,6 +14,9 @@ class RecommendationService:
         self.place_ids = []
         self.similarity_matrix = np.array([])
         self.place_index_map = {}
+
+        # Scoring path tracking (populated per-request)
+        self.last_scoring_path = "unknown"
 
     def refresh_cache(self, db: Session):
         """
@@ -31,21 +34,26 @@ class RecommendationService:
     def get_similar_places(self, place_id: str, limit: int = 10):
         """
         Retrieves the top-N similar places for a given place_id using the cached matrix.
+        Also records which scoring path (blended vs content_only) served this request.
         """
         if place_id not in self.place_index_map:
-            # Place not found in cache (either doesn't exist or was added after last refresh)
+            self.last_scoring_path = "unknown"
             return []
-            
+
+        # Determine scoring path from the strategy if it's a HybridStrategy
+        if hasattr(self.strategy, 'scoring_paths'):
+            self.last_scoring_path = self.strategy.scoring_paths.get(
+                place_id, "content_only"
+            )
+        else:
+            self.last_scoring_path = "content_only"
+
         idx = self.place_index_map[place_id]
         
         # O(1) lookup for this place's similarity row
         similarities = self.similarity_matrix[idx]
         
         # Find indices of the top-N scores
-        # np.argsort sorts in ascending order, so we slice the last `limit` elements and reverse
-        # We fetch limit + 1 just in case self-similarity wasn't handled, but we handle it via -1.0
-        # Wait, argsort over a small array is fast, but if millions, argpartition is better.
-        # Since this is local scale, argsort is perfectly fine for thousands of places.
         num_places = len(similarities)
         fetch_count = min(limit, num_places)
         
@@ -60,7 +68,8 @@ class RecommendationService:
                 
             results.append({
                 "place_id": self.place_ids[i],
-                "similarity_score": round(score, 4)
+                "similarity_score": round(score, 4),
+                "scoring_path": self.last_scoring_path,
             })
             
         return results

@@ -9,6 +9,7 @@ from sqlalchemy import text
 
 from database import get_db
 from recommendation.strategy import ContentProximityStrategy
+from recommendation.collaborative import CollaborativeFilteringStrategy, HybridStrategy
 from recommendation.service import RecommendationService
 
 # --- Logging Setup ---
@@ -19,15 +20,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger("recommendation-service")
 
-# Initialize Recommendation Service
-strategy = ContentProximityStrategy(text_weight=0.7, geo_weight=0.3, geo_decay_km=2.0)
-rec_service = RecommendationService(strategy=strategy)
+# Initialize Recommendation Service with Hybrid Strategy (Phase 2)
+content_strategy = ContentProximityStrategy(text_weight=0.7, geo_weight=0.3, geo_decay_km=2.0)
+collab_strategy = CollaborativeFilteringStrategy(factors=50, iterations=15)
+hybrid_strategy = HybridStrategy(content_strategy, collab_strategy, blend=0.5)
+rec_service = RecommendationService(strategy=hybrid_strategy)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: prepopulate cache
     try:
-        # We handle this carefully in case DB is not yet set up
         if os.getenv("DATABASE_URL"):
             db = next(get_db())
             try:
@@ -41,17 +43,16 @@ async def lifespan(app: FastAPI):
         logger.error(f"Startup: Failed to prepopulate cache - {e}")
     
     yield
-    # Shutdown logic goes here (if any)
 
 # Initialize FastAPI application
 app = FastAPI(
     title="CityGuide Recommendation Service",
-    description="Python FastAPI service for geographic and interaction-based recommendations",
-    version="0.2.0",
+    description="Hybrid content + collaborative recommendation engine",
+    version="0.3.0",
     lifespan=lifespan
 )
 
-# Enable CORS for local cross-origin development (e.g., from web dashboards or local mobile tests)
+# Enable CORS for local cross-origin development
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -65,7 +66,7 @@ app.add_middleware(
 class InteractionRequest(BaseModel):
     user_id: str
     place_id: str
-    interaction_type: str  # e.g., 'view', 'favorite', 'share'
+    interaction_type: str  # e.g., 'view', 'favorite', 'visit'
 
 
 @app.get("/")
@@ -76,22 +77,20 @@ def read_root():
 
 @app.get("/health", status_code=200)
 def health_check():
-    """
-    Service health check endpoint.
-    """
     db_configured = bool(os.getenv("DATABASE_URL"))
-    
     return {
         "status": "healthy",
         "database_configured": db_configured,
-        "service": "recommendation-service"
+        "service": "recommendation-service",
+        "version": "0.3.0",
+        "strategy": "hybrid (content + collaborative)",
     }
 
 
 @app.post("/interactions")
 def log_interaction(interaction: InteractionRequest, db: Session = Depends(get_db)):
     """
-    Logs a user-place interaction (e.g., 'view') into the interactions table.
+    Logs a user-place interaction into the interactions table.
     Called by the Flutter app whenever a user opens a place detail screen.
     """
     try:
@@ -122,8 +121,7 @@ def log_interaction(interaction: InteractionRequest, db: Session = Depends(get_d
 @app.get("/interactions/stats")
 def interaction_stats(db: Session = Depends(get_db)):
     """
-    Returns basic interaction volume stats so you can track
-    when there's enough data to begin Phase 2 (collaborative filtering).
+    Returns interaction volume stats for Phase 2 monitoring.
     """
     try:
         result = db.execute(text("""
@@ -134,10 +132,19 @@ def interaction_stats(db: Session = Depends(get_db)):
             FROM interactions
         """)).fetchone()
 
+        # Also show how many places have enough data for blended scoring
+        collab_ready = db.execute(text(f"""
+            SELECT COUNT(*) as cnt FROM (
+                SELECT place_id FROM interactions
+                GROUP BY place_id HAVING COUNT(*) >= 5
+            ) sub
+        """)).fetchone()
+
         return {
             "total_interactions": result.total,
             "unique_users": result.unique_users,
             "unique_places": result.unique_places,
+            "collab_ready_places": collab_ready.cnt,
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -147,17 +154,20 @@ def interaction_stats(db: Session = Depends(get_db)):
 def get_recommendations(place_id: str, limit: int = 10, db: Session = Depends(get_db)):
     """
     Get top-N similar places for a given place_id.
-    Returns fully hydrated place data (no raw PostGIS objects).
+    Returns fully hydrated place data with scoring path info.
     """
     raw_results = rec_service.get_similar_places(place_id, limit=limit)
+    scoring_path = rec_service.last_scoring_path
+
     if not raw_results:
         raise HTTPException(status_code=404, detail="Place not found in cache or cache is empty.")
     
+    logger.info(f"RECOMMENDATION | place={place_id} | path={scoring_path} | results={len(raw_results)}")
+
     # Hydrate: fetch full place details for the recommended IDs
     rec_ids = [r["place_id"] for r in raw_results]
     score_map = {r["place_id"]: r["similarity_score"] for r in raw_results}
 
-    # Build a parameterized query for the recommended place IDs
     placeholders = ", ".join([f":id_{i}" for i in range(len(rec_ids))])
     params = {f"id_{i}": pid for i, pid in enumerate(rec_ids)}
 
@@ -174,7 +184,6 @@ def get_recommendations(place_id: str, limit: int = 10, db: Session = Depends(ge
         params
     ).fetchall()
 
-    # Build the hydrated response, preserving the similarity order
     row_map = {str(r.id): r for r in rows}
     hydrated = []
     for rec_id in rec_ids:
@@ -193,7 +202,11 @@ def get_recommendations(place_id: str, limit: int = 10, db: Session = Depends(ge
                 "similarity_score": score_map.get(rec_id, 0.0),
             })
 
-    return {"place_id": place_id, "recommendations": hydrated}
+    return {
+        "place_id": place_id,
+        "scoring_path": scoring_path,
+        "recommendations": hydrated,
+    }
 
 
 @app.post("/recommendations/refresh")
