@@ -13,12 +13,22 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY")
 
+# Dev only: set SKIP_AUTH=true in .env to bypass the Supabase login screen.
+# Useful while the profiles/roles table is not populated yet.
+SKIP_AUTH = os.environ.get("SKIP_AUTH", "false").lower() == "true"
+
 st.set_page_config(page_title="City Guide Admin", layout="wide")
 
 
 # --- Supabase Auth (authority/admin role check) ---
 def check_auth():
     """Authenticate using Supabase email/password and verify user has authority/admin role."""
+    if SKIP_AUTH:
+        st.session_state["authenticated"] = True
+        st.session_state.setdefault("user_email", "dev@localhost")
+        st.session_state.setdefault("user_role", "admin (auth bypassed)")
+        return True
+
     if "authenticated" in st.session_state and st.session_state["authenticated"]:
         return True
 
@@ -176,8 +186,9 @@ if not filtered_df.empty:
     
     for idx, row in filtered_df.iterrows():
         color = colors.get(row['status'], 'blue')
-        popup_html = f"<b>{row['category']}</b><br>Status: {row['status']}<br>{row['description']}"
-        if row['photo_url']:
+        description = row['description'] if pd.notna(row['description']) else ''
+        popup_html = f"<b>{row['category']}</b><br>Status: {row['status']}<br>{description}"
+        if pd.notna(row['photo_url']):
             popup_html += f"<br><a href='{row['photo_url']}' target='_blank'>View Photo</a>"
             
         folium.Marker(
@@ -199,11 +210,11 @@ for idx, row in filtered_df.iterrows():
         cols = st.columns([2, 1, 1])
         
         with cols[0]:
-            st.write(f"**Description:** {row['description'] or 'N/A'}")
+            st.write(f"**Description:** {row['description'] if pd.notna(row['description']) else 'N/A'}")
             st.write(f"**Coordinates:** {row['lat']:.5f}, {row['lng']:.5f}")
             if pd.notna(row.get('resolved_at')):
                 st.write(f"**Resolved at:** {row['resolved_at'].strftime('%Y-%m-%d %H:%M')}")
-            if row['photo_url']:
+            if pd.notna(row['photo_url']):
                 st.image(row['photo_url'], width=300)
                 
         with cols[1]:

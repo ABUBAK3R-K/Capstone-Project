@@ -4,6 +4,40 @@ This guide provides step-by-step instructions for setting up and running all com
 
 ---
 
+## ⚡ Quick Start (dev mode, no login)
+
+Supabase Auth is not wired up yet (the `profiles` table has no rows, so no account
+can pass the authority/admin role check). Both apps therefore ship a **dev auth
+bypass** that is already switched on in the local `.env` files:
+
+| Component | Flag | File |
+| :--- | :--- | :--- |
+| Admin Dashboard | `SKIP_AUTH=true` | `admin-dashboard/.env` |
+| Mobile App | `DEV_SKIP_AUTH=true` | `mobile/.env` |
+
+Set either flag to `false` to get the normal login screen back.
+
+Three terminals:
+
+```bash
+# 1. Recommendation API  -> http://127.0.0.1:8000/docs
+cd recommendation-service && .venv/Scripts/python -m uvicorn main:app --reload --port 8000
+
+# 2. Admin dashboard     -> http://localhost:8501
+cd admin-dashboard && .venv/Scripts/python -m streamlit run app.py
+
+# 3. Mobile app          -> press `a` for Android, `i` for iOS, or scan with Expo Go
+cd mobile && npx expo start
+```
+
+**What works without logging in:** the map, place lists, place details and
+"similar places" recommendations, and the whole admin dashboard.
+**What does not:** submitting a problem report and logging interactions — both
+need a real Supabase user, because `problem_reports` / `interactions` have a
+foreign key to `profiles` and RLS only allows authenticated inserts.
+
+---
+
 ## 📋 System Prerequisites
 
 Before getting started, make sure you have the following installed on your system:
@@ -12,7 +46,7 @@ Before getting started, make sure you have the following installed on your syste
 | :--- | :--- | :--- |
 | **Recommendation Service** | Python | 3.10+ |
 | **Admin Dashboard** | Python | 3.10+ |
-| **Mobile App** | Flutter SDK & Android Studio / Emulator | Flutter 3.x+ / Dart 3.x+ |
+| **Mobile App** | Node.js & Expo Go (or Android Studio / Xcode emulator) | Node 18+ / Expo SDK 52 |
 | **Database** | Supabase CLI (Local) or Supabase Cloud Account | Latest |
 | **Version Control** | Git | Latest |
 
@@ -142,34 +176,40 @@ The admin dashboard provides municipal authorities with a web interface to revie
 
 ---
 
-## 📱 4. Mobile Application (Flutter)
+## 📱 4. Mobile Application (React Native / Expo)
 
-The mobile client is the primary application for community members to browse maps, get recommendations, and report civic issues.
+The mobile client is the primary application for community members to browse maps, get recommendations, and report civic issues. It was rebuilt in React Native (Expo managed workflow) — the previous Flutter implementation has been removed.
 
 ### Steps:
-1. Ensure your Flutter environment is ready:
+1. Ensure Node.js 18+ is installed:
    ```bash
-   flutter doctor
+   node -v
    ```
-2. Start an Android emulator from Android Studio or connect a physical Android device with USB debugging enabled.
-3. Navigate to the `mobile` folder:
+2. Navigate to the `mobile` folder and install dependencies:
    ```bash
    cd mobile
+   npm install
    ```
 
-4. Install the Flutter dependencies:
+3. Configure environment variables:
+   - Copy `.env.example` to `.env` and fill it in.
+   - All keys are prefixed `EXPO_PUBLIC_` so Expo inlines them at build time.
+   - `EXPO_PUBLIC_RECOMMENDATIONS_URL` → `http://10.0.2.2:8000` for an Android emulator, `http://127.0.0.1:8000` for an iOS simulator, or your machine's LAN IP for a physical device.
+   - `EXPO_PUBLIC_MAP_TILE_URL` → a hosted OSM-style raster tile URL (Mapbox / MapTiler). **Do not use `tile.openstreetmap.org`** — `react-native-maps` blocks it on Android and the map will be blank there. See `mobile/README.md`.
+
+4. Start the dev server:
    ```bash
-   flutter pub get
+   npx expo start
    ```
+   Then press `a` for an Android emulator, `i` for an iOS simulator, or scan the QR code with Expo Go. No `expo prebuild` is required.
 
-5. Configure environment variables / constants:
-   - Copy `.env.example` to `.env` (if present) or verify Supabase configuration keys in the app config.
-   - Point the backend URL to your running Recommendation Service (`http://10.0.2.2:8000` for Android Emulator localhost access).
-
-6. Run the app:
+5. Useful checks:
    ```bash
-   flutter run
+   npm run typecheck                    # tsc --noEmit
+   npx expo export --platform android   # verify the bundle builds
    ```
+
+> After editing `.env`, restart with `npx expo start --clear` — inlined values are baked into the bundle.
 
 ---
 
@@ -179,5 +219,5 @@ The mobile client is the primary application for community members to browse map
 | :--- | :--- | :--- | :--- |
 | **Recommendation Service** | `/recommendation-service` | `uvicorn main:app --reload` | `http://127.0.0.1:8000` |
 | **Admin Dashboard** | `/admin-dashboard` | `streamlit run app.py` | `http://localhost:8501` |
-| **Mobile Client** | `/mobile` | `flutter run` | Android Device / Emulator |
+| **Mobile Client** | `/mobile` | `npx expo start` | Expo Go / Emulator |
 | **Supabase Local** | `/supabase` or root | `supabase start` | `http://127.0.0.1:54321` |

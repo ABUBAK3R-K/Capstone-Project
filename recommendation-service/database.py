@@ -16,7 +16,7 @@ if DATABASE_URL.startswith("postgres://"):
 
 # Initialize the SQLAlchemy Engine
 # Note: For production use with Supabase, you might want to use the session pooler URL
-engine = create_engine(DATABASE_URL) if DATABASE_URL else None
+engine = create_engine(DATABASE_URL, pool_pre_ping=True, pool_recycle=300) if DATABASE_URL else None
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
