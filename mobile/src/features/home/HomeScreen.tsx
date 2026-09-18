@@ -4,13 +4,12 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import Animated, { FadeIn } from 'react-native-reanimated';
 
-import { useAuth } from '@/providers/AuthProvider';
 import { EmptyState } from '@/design/components/EmptyState';
 import { SectionHeader } from '@/design/components/SectionHeader';
 import { ChipRowSkeleton, PlaceCardSkeleton, RailSkeleton } from '@/design/components/Skeleton';
 import { screenGutter } from '@/design/components/Screen';
 import { palette, spacing } from '@/design/tokens';
-import { useHomePlaces, useNearbyReports } from '@/hooks/usePlaces';
+import { useHomePlaces } from '@/hooks/usePlaces';
 import { useLocation } from '@/providers/LocationProvider';
 import { distanceMeters } from '@/lib/geo';
 import type { RootStackParamList } from '@/navigation/types';
@@ -18,7 +17,6 @@ import type { Place } from '@/types/place';
 import { CategoryRail } from './components/CategoryRail';
 import { HomeHeader } from './components/HomeHeader';
 import { PlaceCard, RAIL_CARD_WIDTH } from './components/PlaceCard';
-import { ProblemCard } from './components/ProblemCard';
 
 type Navigation = NativeStackNavigationProp<RootStackParamList>;
 
@@ -31,7 +29,6 @@ function greetingFor(date: Date): string {
 
 export function HomeScreen() {
   const navigation = useNavigation<Navigation>();
-  const { user, isGuest } = useAuth();
   const { center, isResolving, isFallback, retry } = useLocation();
 
   const placesEnabled = !isResolving;
@@ -45,12 +42,6 @@ export function HomeScreen() {
     isRefetching,
   } = useHomePlaces(center, placesEnabled);
 
-  const {
-    reports,
-    isLoading: reportsLoading,
-    refetch: refetchReports,
-  } = useNearbyReports(center, placesEnabled && Boolean(user));
-
   const openPlace = useCallback(
     (place: Place) => navigation.navigate('PlaceDetail', { place }),
     [navigation],
@@ -63,8 +54,7 @@ export function HomeScreen() {
 
   const onRefresh = useCallback(() => {
     void refetchPlaces();
-    void refetchReports();
-  }, [refetchPlaces, refetchReports]);
+  }, [refetchPlaces]);
 
   const greeting = useMemo(() => greetingFor(new Date()), []);
   const locationLabel = isResolving
@@ -186,47 +176,6 @@ export function HomeScreen() {
             </View>
           ) : null}
         </View>
-
-        {/* ─── Reports ───────────────────────────────────────────────────────
-            RLS only exposes a user's own reports unless their profile role is
-            authority/admin, so this section is titled honestly rather than
-            pretending to be a city-wide feed. */}
-        <View style={styles.section}>
-          <SectionHeader
-            eyebrow="Civic"
-            title="Your reports nearby"
-            actionLabel="Report an issue"
-            onAction={() => navigation.navigate('Tabs', { screen: 'Report' })}
-          />
-          {isGuest ? (
-            <EmptyState
-              compact
-              icon="lock-closed-outline"
-              title="Sign in to see your reports"
-              message="Reports are private to you until an authority picks them up."
-              style={styles.gutter}
-            />
-          ) : reportsLoading ? (
-            <View style={styles.stack}>
-              <PlaceCardSkeleton />
-            </View>
-          ) : reports.length > 0 ? (
-            <View style={styles.stack}>
-              {reports.slice(0, 4).map((report) => (
-                <ProblemCard key={report.id} report={report} />
-              ))}
-            </View>
-          ) : (
-            <EmptyState
-              compact
-              icon="checkmark-done-outline"
-              title="Nothing reported yet"
-              message="Spotted a pothole or a broken light? Snap it and it lands with the city."
-              actionLabel="Report an issue"
-              onAction={() => navigation.navigate('Tabs', { screen: 'Report' })}
-            />
-          )}
-        </View>
       </ScrollView>
     </View>
   );
@@ -238,5 +187,4 @@ const styles = StyleSheet.create({
   section: { marginTop: spacing.xxxl },
   rail: { paddingHorizontal: screenGutter, gap: spacing.md, paddingVertical: spacing.xs },
   stack: { paddingHorizontal: screenGutter, gap: spacing.md },
-  gutter: { marginHorizontal: screenGutter },
 });

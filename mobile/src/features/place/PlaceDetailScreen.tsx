@@ -16,6 +16,7 @@ import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useAuth } from '@/providers/AuthProvider';
 import { Badge } from '@/design/components/Badge';
 import { SectionHeader } from '@/design/components/SectionHeader';
+import { WaveDivider } from '@/design/components/WaveDivider';
 import { Text } from '@/design/typography';
 import { screenGutter } from '@/design/components/Screen';
 import { palette, radius, shadows, spacing } from '@/design/tokens';
@@ -91,6 +92,9 @@ export function PlaceDetailScreen() {
       >
         <Animated.View style={heroStyle}>
           <ImageCarousel images={place.images} category={place.category} height={HERO_HEIGHT} />
+          {/* The one wave accent on this screen — the photo "pours into" the
+              content sheet below it, rather than being cut by a straight edge. */}
+          <WaveDivider color={palette.canvas} height={30} style={styles.wave} />
         </Animated.View>
 
         <View style={styles.sheet}>
@@ -229,13 +233,12 @@ function DetailRow({
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: palette.canvas },
   content: { paddingBottom: spacing.huge },
+  wave: { position: 'absolute', bottom: -1, left: 0, right: 0 },
   sheet: {
-    marginTop: -spacing.xxl,
+    marginTop: -spacing.sm,
     paddingTop: spacing.xxl,
     paddingHorizontal: screenGutter,
     backgroundColor: palette.canvas,
-    borderTopLeftRadius: radius.xxl + 4,
-    borderTopRightRadius: radius.xxl + 4,
     gap: spacing.xxl,
   },
   headerBlock: { gap: spacing.md },

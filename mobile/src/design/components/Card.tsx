@@ -1,7 +1,7 @@
 import { Pressable, StyleSheet, View, type ViewProps, type ViewStyle } from 'react-native';
 import Animated, { useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 
-import { motion, palette, radius, shadows, spacing } from '../tokens';
+import { motion, organicCorner, palette, radius, shadows, spacing } from '../tokens';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -9,6 +9,9 @@ interface CardProps extends ViewProps {
   onPress?: () => void;
   padded?: boolean;
   elevation?: 'sm' | 'md' | 'lg' | 'none';
+  /** Swaps the uniform corner radius for the asymmetric "wave" treatment — a
+   * hero-moment accent, not a default. Use on at most one card per screen. */
+  organic?: boolean;
   style?: ViewStyle | ViewStyle[];
 }
 
@@ -20,6 +23,7 @@ export function Card({
   onPress,
   padded = true,
   elevation = 'sm',
+  organic = false,
   style,
   children,
   ...rest
@@ -27,7 +31,13 @@ export function Card({
   const scale = useSharedValue(1);
   const animatedStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
 
-  const surface = [styles.card, shadows[elevation], padded && styles.padded, style];
+  const surface = [
+    styles.card,
+    organic && organicCorner,
+    shadows[elevation],
+    padded && styles.padded,
+    style,
+  ];
 
   if (!onPress) {
     return (

@@ -15,7 +15,7 @@ const config: ExpoConfig = {
   newArchEnabled: true,
   splash: {
     resizeMode: 'contain',
-    backgroundColor: '#16181D',
+    backgroundColor: '#140E0C',
   },
   assetBundlePatterns: ['**/*'],
   ios: {
@@ -33,7 +33,7 @@ const config: ExpoConfig = {
   android: {
     package: 'com.cityguide.app',
     adaptiveIcon: {
-      backgroundColor: '#16181D',
+      backgroundColor: '#140E0C',
     },
     permissions: [
       'ACCESS_COARSE_LOCATION',

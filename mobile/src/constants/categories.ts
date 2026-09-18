@@ -44,12 +44,12 @@ export interface ReportCategoryMeta {
 }
 
 export const REPORT_CATEGORIES: ReportCategoryMeta[] = [
-  { name: 'Pothole', icon: 'warning', color: '#E0562F' },
-  { name: 'Garbage', icon: 'trash', color: '#7A6A50' },
-  { name: 'Street Light', icon: 'bulb', color: '#F2A61B' },
-  { name: 'Water Leakage', icon: 'water', color: '#1F86D6' },
+  { name: 'Pothole', icon: 'warning', color: '#DA611B' },
+  { name: 'Garbage', icon: 'trash', color: '#6E5A3F' },
+  { name: 'Street Light', icon: 'bulb', color: '#D9A32A' },
+  { name: 'Water Leakage', icon: 'water', color: '#2E6E8E' },
   { name: 'Damaged Road', icon: 'construct', color: '#8B5E3C' },
-  { name: 'Other', icon: 'ellipsis-horizontal', color: '#6B7280' },
+  { name: 'Other', icon: 'ellipsis-horizontal', color: '#8A7A6C' },
 ];
 
 const reportByName = new Map(REPORT_CATEGORIES.map((c) => [c.name, c]));
