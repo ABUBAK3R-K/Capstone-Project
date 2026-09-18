@@ -49,3 +49,8 @@ Thumbs.db
 # --- Supabase ---
 supabase/.temp/
 supabase/.branches/
+
+# --- Skills & Agent Tools ---
+skills/
+**/skills/
+skills-lock.json
