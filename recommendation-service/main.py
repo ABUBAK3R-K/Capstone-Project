@@ -3,11 +3,12 @@ import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 
-from database import get_db
+from database import get_db, engine as db_engine
 from recommendation.strategy import ContentProximityStrategy
 from recommendation.collaborative import CollaborativeFilteringStrategy, HybridStrategy
 from recommendation.service import RecommendationService
@@ -75,16 +76,34 @@ def read_root():
         "message": "Welcome to the CityGuide Recommendation Service API. Visit /docs for Swagger documentation."
     }
 
-@app.get("/health", status_code=200)
+@app.get("/health")
 def health_check():
+    """
+    Actually pings the database rather than just checking that DATABASE_URL is
+    set — a set-but-wrong connection string (bad host, expired pooler creds)
+    would otherwise report "healthy" while every /recommendations call 404s
+    from an empty, never-populated cache.
+    """
     db_configured = bool(os.getenv("DATABASE_URL"))
-    return {
-        "status": "healthy",
+    db_connected = False
+
+    if db_configured and db_engine is not None:
+        try:
+            with db_engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+            db_connected = True
+        except Exception as e:
+            logger.error(f"Health check: database ping failed - {e}")
+
+    payload = {
+        "status": "healthy" if db_connected else "degraded",
         "database_configured": db_configured,
+        "database_connected": db_connected,
         "service": "recommendation-service",
         "version": "0.3.0",
         "strategy": "hybrid (content + collaborative)",
     }
+    return JSONResponse(content=payload, status_code=200 if db_connected else 503)
 
 
 @app.post("/interactions")

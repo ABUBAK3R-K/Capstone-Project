@@ -100,8 +100,12 @@ def evaluate(k_values=[5, 10]):
         print("This typically means not enough interaction data yet.")
         print("Falling back to content-only evaluation.\n")
 
-    # 3. Build the hybrid strategy on training data only
-    # We simulate a training-only DB by temporarily filtering
+    # 3. Build the hybrid strategy on training data only.
+    # `cutoff_time` is the created_at of the last training-set interaction;
+    # CollaborativeFilteringStrategy and HybridStrategy both filter their SQL
+    # queries by it (recommendation/collaborative.py), so the model is fit
+    # only on interactions the "past" would actually have had — none of the
+    # test window leaks into training.
     from recommendation.strategy import ContentProximityStrategy
     from recommendation.collaborative import CollaborativeFilteringStrategy, HybridStrategy
     from recommendation.service import RecommendationService
@@ -110,8 +114,11 @@ def evaluate(k_values=[5, 10]):
     collab_strategy = CollaborativeFilteringStrategy(factors=50, iterations=15)
     hybrid = HybridStrategy(content_strategy, collab_strategy, blend=0.5)
 
+    cutoff_time = train_data[-1].created_at
+    print(f"Training cutoff: {cutoff_time} (interactions after this are held out as test data)")
+
     rec_service = RecommendationService(strategy=hybrid)
-    n_places = rec_service.refresh_cache(session)
+    n_places = rec_service.refresh_cache(session, cutoff_time=cutoff_time)
     print(f"Cached {n_places} places for evaluation.\n")
 
     # 4. Compute metrics

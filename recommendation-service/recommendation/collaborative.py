@@ -44,21 +44,33 @@ class CollaborativeFilteringStrategy(RecommendationStrategy):
         self.iterations = iterations
         self.regularization = regularization
 
-    def build_matrix(self, db: Session):
+    def build_matrix(self, db: Session, cutoff_time=None):
         """
-        1. Query weighted interactions from the database.
+        1. Query weighted interactions from the database (optionally only those
+           created at or before `cutoff_time`, so an offline evaluation trains
+           on the training split alone rather than the full dataset).
         2. Build a sparse user-item matrix.
         3. Factorize with implicit ALS to get item latent factors.
         4. Compute item-item cosine similarity from the factors.
         """
-        # Step 1: Fetch all interactions with their types
-        query = text("""
-            SELECT user_id::text, place_id::text, interaction_type,
-                   COUNT(*) as cnt
-            FROM interactions
-            GROUP BY user_id, place_id, interaction_type
-        """)
-        rows = db.execute(query).fetchall()
+        # Step 1: Fetch interactions with their types, optionally time-bounded
+        if cutoff_time is not None:
+            query = text("""
+                SELECT user_id::text, place_id::text, interaction_type,
+                       COUNT(*) as cnt
+                FROM interactions
+                WHERE created_at <= :cutoff_time
+                GROUP BY user_id, place_id, interaction_type
+            """)
+            rows = db.execute(query, {"cutoff_time": cutoff_time}).fetchall()
+        else:
+            query = text("""
+                SELECT user_id::text, place_id::text, interaction_type,
+                       COUNT(*) as cnt
+                FROM interactions
+                GROUP BY user_id, place_id, interaction_type
+            """)
+            rows = db.execute(query).fetchall()
 
         if not rows:
             logger.warning("CollaborativeFiltering: No interactions found.")
@@ -156,28 +168,40 @@ class HybridStrategy(RecommendationStrategy):
         # Populated after build_matrix() runs
         self.scoring_paths = {}  # place_id -> "blended" | "content_only"
 
-    def build_matrix(self, db: Session):
+    def build_matrix(self, db: Session, cutoff_time=None):
         # 1. Build content matrix (covers ALL places)
-        content_ids, content_matrix = self.content_strategy.build_matrix(db)
+        content_ids, content_matrix = self.content_strategy.build_matrix(db, cutoff_time)
         if not content_ids:
             return [], np.array([])
 
         content_id_idx = {pid: i for i, pid in enumerate(content_ids)}
         n = len(content_ids)
 
-        # 2. Build collaborative matrix (covers only interacted-with places)
-        collab_ids, collab_matrix = self.collab_strategy.build_matrix(db)
+        # 2. Build collaborative matrix (covers only interacted-with places,
+        #    honoring the same cutoff so evaluate.py trains on the training
+        #    split only, not on data from the test window)
+        collab_ids, collab_matrix = self.collab_strategy.build_matrix(db, cutoff_time)
         collab_id_idx = {pid: i for i, pid in enumerate(collab_ids)}
 
-        # 3. Count interactions per place for cold-start detection
+        # 3. Count interactions per place for cold-start detection — same
+        #    cutoff, so the blended/content_only decision itself isn't leaked
+        #    test-window information either.
         interaction_counts = {}
         if collab_ids:
             try:
-                result = db.execute(text("""
-                    SELECT place_id::text, COUNT(*) as cnt
-                    FROM interactions
-                    GROUP BY place_id
-                """)).fetchall()
+                if cutoff_time is not None:
+                    result = db.execute(text("""
+                        SELECT place_id::text, COUNT(*) as cnt
+                        FROM interactions
+                        WHERE created_at <= :cutoff_time
+                        GROUP BY place_id
+                    """), {"cutoff_time": cutoff_time}).fetchall()
+                else:
+                    result = db.execute(text("""
+                        SELECT place_id::text, COUNT(*) as cnt
+                        FROM interactions
+                        GROUP BY place_id
+                    """)).fetchall()
                 interaction_counts = {r.place_id: r.cnt for r in result}
             except Exception as e:
                 logger.error(f"HybridStrategy: Failed to fetch interaction counts: {e}")

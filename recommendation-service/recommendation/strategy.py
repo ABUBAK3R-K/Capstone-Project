@@ -7,11 +7,15 @@ from sklearn.metrics.pairwise import cosine_similarity, haversine_distances
 
 class RecommendationStrategy(ABC):
     @abstractmethod
-    def build_matrix(self, db: Session):
+    def build_matrix(self, db: Session, cutoff_time=None):
         """
         Builds and returns a tuple of (place_ids_list, similarity_matrix).
         The similarity_matrix is a 2D numpy array where matrix[i][j] is the similarity score
         between place_ids_list[i] and place_ids_list[j].
+
+        `cutoff_time`, when given, restricts any interaction-derived data to rows
+        created at or before that timestamp — used by evaluate.py to train only on
+        the training split. Strategies that don't read `interactions` may ignore it.
         """
         pass
 
@@ -22,7 +26,8 @@ class ContentProximityStrategy(RecommendationStrategy):
         self.geo_decay_km = geo_decay_km
         self.earth_radius_km = 6371.0
 
-    def build_matrix(self, db: Session):
+    def build_matrix(self, db: Session, cutoff_time=None):
+        # No interaction data is read here, so there is nothing to cut off by time.
         # 1. Fetch all places with their extracted Lat/Lon from PostGIS
         query = text("""
             SELECT 

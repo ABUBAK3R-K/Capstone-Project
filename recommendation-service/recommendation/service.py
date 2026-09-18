@@ -18,12 +18,17 @@ class RecommendationService:
         # Scoring path tracking (populated per-request)
         self.last_scoring_path = "unknown"
 
-    def refresh_cache(self, db: Session):
+    def refresh_cache(self, db: Session, cutoff_time=None):
         """
         Recomputes the similarity matrix using the injected strategy.
         Should be called on app startup and via the /refresh endpoint.
+
+        `cutoff_time` is forwarded to the strategy and, for strategies that
+        read `interactions`, restricts training data to rows created at or
+        before that timestamp. Production callers (startup, /refresh) omit it
+        to use the full dataset; evaluate.py sets it to the training cutoff.
         """
-        place_ids, sim_matrix = self.strategy.build_matrix(db)
+        place_ids, sim_matrix = self.strategy.build_matrix(db, cutoff_time)
         
         self.place_ids = place_ids
         self.similarity_matrix = sim_matrix
