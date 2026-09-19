@@ -4,6 +4,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeInUp } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
+import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { useAuth } from '@/providers/AuthProvider';
 import { Button } from '@/design/components/Button';
@@ -15,9 +17,13 @@ import { useLocation } from '@/providers/LocationProvider';
 import { useNearbyReports } from '@/hooks/usePlaces';
 import { hasMapTiles, hasRecommendationService } from '@/lib/env';
 import { gradients, palette, radius, spacing, withAlpha } from '@/design/tokens';
+import type { RootStackParamList } from '@/navigation/types';
+
+type Navigation = NativeStackNavigationProp<RootStackParamList>;
 
 export function ProfileScreen() {
   const { user, isGuest, signOut } = useAuth();
+  const navigation = useNavigation<Navigation>();
   const insets = useSafeAreaInsets();
   const { center } = useLocation();
   const { reports } = useNearbyReports(center, Boolean(user));
@@ -85,6 +91,31 @@ export function ProfileScreen() {
             })}
           </View>
         </View>
+
+        {/* ─── Bookings ──────────────────────────────────────────────────── */}
+        {!isGuest ? (
+          <View style={styles.section}>
+            <Text variant="title" weight="bold">
+              Bookings
+            </Text>
+            <Card padded={false} onPress={() => navigation.navigate('MyBookings')} style={styles.bookingsCard}>
+              <View style={styles.bookingsRow}>
+                <View style={styles.bookingsIcon}>
+                  <Ionicons name="calendar-outline" size={18} color={palette.primary} />
+                </View>
+                <View style={styles.bookingsCopy}>
+                  <Text variant="label" weight="semibold">
+                    My bookings &amp; orders
+                  </Text>
+                  <Text variant="caption" tone="muted">
+                    Track requests you've placed with local businesses
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={17} color={palette.inkFaint} />
+              </View>
+            </Card>
+          </View>
+        ) : null}
 
         {/* ─── Service status ────────────────────────────────────────────────
             Surfaced here rather than hidden in logs: an unconfigured service
@@ -216,4 +247,15 @@ const styles = StyleSheet.create({
   },
   serviceDot: { width: 7, height: 7, borderRadius: radius.pill },
   serviceCopy: { flex: 1, gap: spacing.xxs },
+  bookingsCard: { paddingHorizontal: spacing.lg },
+  bookingsRow: { flexDirection: 'row', alignItems: 'center', gap: spacing.md, paddingVertical: spacing.md },
+  bookingsIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: radius.sm,
+    backgroundColor: palette.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bookingsCopy: { flex: 1, gap: spacing.xxs },
 });

@@ -24,7 +24,9 @@ import { categoryMeta } from '@/constants/categories';
 import { hasRecommendationService } from '@/lib/env';
 import { logInteraction } from '@/lib/recommendations';
 import { useSimilarPlaces } from '@/hooks/usePlaces';
+import { useBusinessDetail } from '@/hooks/useBusiness';
 import type { RootStackParamList } from '@/navigation/types';
+import { BusinessSection } from './components/BusinessSection';
 import { ImageCarousel } from './components/ImageCarousel';
 import { SimilarPlacesHeading, SimilarPlacesRow } from './components/SimilarPlacesRow';
 
@@ -44,6 +46,10 @@ export function PlaceDetailScreen() {
 
   const { data, isLoading, isError, refetch } = useSimilarPlaces(place.id);
   const similar = data ?? [];
+
+  // Null means "not a business, or not yet approved" (RLS-gated, see
+  // migration 008) — either way this place renders exactly as before.
+  const { data: business } = useBusinessDetail(place.id);
 
   // Feeds the collaborative-filtering signal. Best-effort, never blocks render.
   useEffect(() => {
@@ -174,6 +180,8 @@ export function PlaceDetailScreen() {
               ) : null}
             </View>
           </View>
+
+          {business ? <BusinessSection business={business} /> : null}
         </View>
 
         {/* ─── Similar places ────────────────────────────────────────────── */}
