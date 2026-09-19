@@ -24,19 +24,26 @@ type Mode = 'signin' | 'signup';
 const COPY: Record<Mode, { title: string; subtitle: string; cta: string; switchTo: string }> = {
   signin: {
     title: 'Welcome back',
-    subtitle: 'Pick up where you left off — your city is still moving.',
+    subtitle: 'Sign in to manage your listing and bookings.',
     cta: 'Sign in',
-    switchTo: 'New here? Create an account',
+    switchTo: 'New business? Create an account',
   },
   signup: {
-    title: 'Explore your city',
-    subtitle: 'Discover local places and report what needs fixing.',
-    cta: 'Create account',
+    title: 'List your business',
+    subtitle: 'Get discovered by nearby customers and manage bookings in one place.',
+    cta: 'Create business account',
     switchTo: 'Already have an account? Sign in',
   },
 };
 
-export function AuthScreen() {
+/**
+ * The business counterpart of AuthScreen — same email/password mechanics,
+ * but signs up with account_type: 'business' (migration 008) so
+ * RootNavigator routes into BusinessTabNavigator instead of the customer
+ * tabs. The business's name/category/etc. are collected later, when they
+ * create their listing on the dashboard — not here.
+ */
+export function BusinessAuthScreen() {
   const { signIn, signUp } = useAuth();
   const navigation = useNavigation();
 
@@ -70,7 +77,7 @@ export function AuthScreen() {
       if (mode === 'signin') {
         await signIn(email.trim(), password);
       } else {
-        const { needsConfirmation } = await signUp(email.trim(), password);
+        const { needsConfirmation } = await signUp(email.trim(), password, { accountType: 'business' });
         if (needsConfirmation) {
           setNotice('Check your inbox to confirm your email, then sign in.');
           setMode('signin');
@@ -91,7 +98,6 @@ export function AuthScreen() {
 
   return (
     <View style={styles.root}>
-      {/* Ink hero anchors the brand before any content loads. */}
       <LinearGradient
         colors={gradients.inkHero}
         start={{ x: 0, y: 0 }}
@@ -112,10 +118,10 @@ export function AuthScreen() {
           ) : null}
           <View style={styles.brand}>
             <View style={styles.mark}>
-              <Ionicons name="navigate" size={20} color={palette.inkInverse} />
+              <Ionicons name="storefront" size={20} color={palette.inkInverse} />
             </View>
             <Text variant="label" weight="semibold" tone="inverse" uppercase style={styles.wordmark}>
-              CityGuide
+              CityGuide Business
             </Text>
           </View>
         </Animated.View>
@@ -144,7 +150,7 @@ export function AuthScreen() {
             <Field
               label="Email"
               icon="mail-outline"
-              placeholder="you@example.com"
+              placeholder="owner@example.com"
               value={email}
               onChangeText={setEmail}
               autoCapitalize="none"
@@ -164,6 +170,16 @@ export function AuthScreen() {
               onSubmitEditing={submit}
             />
           </Animated.View>
+
+          {mode === 'signup' ? (
+            <View style={styles.noticeInline}>
+              <Ionicons name="information-circle-outline" size={16} color={palette.inkMuted} />
+              <Text variant="caption" tone="muted" style={styles.noticeInlineText}>
+                After signing up you'll set up your listing and submit verification documents for
+                review — your business won't appear to customers until it's approved.
+              </Text>
+            </View>
+          ) : null}
 
           {notice ? (
             <Animated.View entering={FadeIn} style={[styles.banner, styles.bannerInfo]}>
@@ -220,11 +236,11 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: radius.sm,
-    backgroundColor: palette.primary,
+    backgroundColor: palette.secondary,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  wordmark: { letterSpacing: 1.6 },
+  wordmark: { letterSpacing: 1.2 },
   heroCopy: { gap: spacing.sm },
   heroSubtitle: { color: palette.onInkMuted, maxWidth: 300 },
   formWrap: { flex: 1 },
@@ -234,6 +250,8 @@ const styles = StyleSheet.create({
     gap: spacing.xl,
   },
   fields: { gap: spacing.lg },
+  noticeInline: { flexDirection: 'row', gap: spacing.sm, paddingHorizontal: spacing.xxs },
+  noticeInlineText: { flex: 1 },
   banner: {
     flexDirection: 'row',
     alignItems: 'flex-start',
