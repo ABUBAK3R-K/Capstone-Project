@@ -1,110 +1,33 @@
-import os
-import streamlit as st
 import pandas as pd
-import psycopg2
+import streamlit as st
 import folium
 from streamlit_folium import st_folium
-from dotenv import load_dotenv
 
-# Load environment variables
-load_dotenv()
-
-DATABASE_URL = os.environ.get("DATABASE_URL")
-SUPABASE_URL = os.environ.get("SUPABASE_URL")
-SUPABASE_ANON_KEY = os.environ.get("SUPABASE_ANON_KEY")
-
-# Dev only: set SKIP_AUTH=true in .env to bypass the Supabase login screen.
-# Useful while the profiles/roles table is not populated yet.
-SKIP_AUTH = os.environ.get("SKIP_AUTH", "false").lower() == "true"
+from lib.auth import require_auth, render_account_sidebar
+from lib.db import get_connection
 
 st.set_page_config(page_title="City Guide Admin", layout="wide")
 
-
-# --- Supabase Auth (authority/admin role check) ---
-def check_auth():
-    """Authenticate using Supabase email/password and verify user has authority/admin role."""
-    if SKIP_AUTH:
-        st.session_state["authenticated"] = True
-        st.session_state.setdefault("user_email", "dev@localhost")
-        st.session_state.setdefault("user_role", "admin (auth bypassed)")
-        return True
-
-    if "authenticated" in st.session_state and st.session_state["authenticated"]:
-        return True
-
-    st.title("🔐 Admin Dashboard Login")
-    st.caption("Only users with 'authority' or 'admin' role can access this dashboard.")
-    
-    email = st.text_input("Email", key="login_email")
-    password = st.text_input("Password", type="password", key="login_password")
-    
-    if st.button("Sign In"):
-        if not SUPABASE_URL or not SUPABASE_ANON_KEY:
-            st.error("SUPABASE_URL and SUPABASE_ANON_KEY must be set in .env")
-            return False
-
-        try:
-            from supabase import create_client
-            sb = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-            
-            # Sign in with Supabase Auth
-            auth_response = sb.auth.sign_in_with_password({
-                "email": email,
-                "password": password,
-            })
-            user_id = auth_response.user.id
-            
-            # Check role in profiles table via direct Postgres
-            conn_check = psycopg2.connect(DATABASE_URL)
-            cur = conn_check.cursor()
-            cur.execute("SELECT role FROM profiles WHERE id = %s", (user_id,))
-            row = cur.fetchone()
-            cur.close()
-            conn_check.close()
-            
-            if row and row[0] in ('authority', 'admin'):
-                st.session_state["authenticated"] = True
-                st.session_state["user_email"] = email
-                st.session_state["user_role"] = row[0]
-                st.rerun()
-            else:
-                st.error("Access denied. Your account does not have authority or admin privileges.")
-                return False
-        except Exception as e:
-            st.error(f"Login failed: {e}")
-            return False
-
-    return False
-
-if not check_auth():
+if not require_auth():
     st.stop()
 
-
-# --- Database Connection ---
-@st.cache_resource
-def init_connection():
-    if not DATABASE_URL:
-        st.error("DATABASE_URL is not set in .env")
-        st.stop()
-    return psycopg2.connect(DATABASE_URL)
-
-conn = init_connection()
+conn = get_connection()
 
 
 # --- Data Fetching ---
 @st.cache_data(ttl=60)
 def fetch_reports():
     query = """
-    SELECT 
-        id, 
-        category, 
-        description, 
-        status, 
-        photo_url, 
+    SELECT
+        id,
+        category,
+        description,
+        status,
+        photo_url,
         created_at,
         resolved_at,
-        ST_Y(location::geometry) as lat, 
-        ST_X(location::geometry) as lng 
+        ST_Y(location::geometry) as lat,
+        ST_X(location::geometry) as lng
     FROM problem_reports
     ORDER BY created_at DESC
     """
@@ -136,12 +59,7 @@ def advance_status(report_id, current_status):
 
 # --- Header ---
 st.title("🏛️ Admin Dashboard — Civic Reports")
-if "user_email" in st.session_state:
-    st.caption(f"Logged in as **{st.session_state['user_email']}** ({st.session_state.get('user_role', 'unknown')})")
-    if st.sidebar.button("Logout"):
-        for key in list(st.session_state.keys()):
-            del st.session_state[key]
-        st.rerun()
+render_account_sidebar()
 
 # Load data
 df = fetch_reports()
@@ -183,14 +101,14 @@ if not filtered_df.empty:
     m = folium.Map(location=[center_lat, center_lng], zoom_start=13)
 
     colors = {'reported': 'red', 'in_progress': 'orange', 'fixed': 'green'}
-    
+
     for idx, row in filtered_df.iterrows():
         color = colors.get(row['status'], 'blue')
         description = row['description'] if pd.notna(row['description']) else ''
         popup_html = f"<b>{row['category']}</b><br>Status: {row['status']}<br>{description}"
         if pd.notna(row['photo_url']):
             popup_html += f"<br><a href='{row['photo_url']}' target='_blank'>View Photo</a>"
-            
+
         folium.Marker(
             [row['lat'], row['lng']],
             popup=popup_html,
@@ -208,7 +126,7 @@ st.subheader("📋 Actionable Reports")
 for idx, row in filtered_df.iterrows():
     with st.expander(f"{row['category']} — {row['status'].replace('_', ' ').title()} ({row['created_at'].strftime('%Y-%m-%d')})"):
         cols = st.columns([2, 1, 1])
-        
+
         with cols[0]:
             st.write(f"**Description:** {row['description'] if pd.notna(row['description']) else 'N/A'}")
             st.write(f"**Coordinates:** {row['lat']:.5f}, {row['lng']:.5f}")
@@ -216,10 +134,10 @@ for idx, row in filtered_df.iterrows():
                 st.write(f"**Resolved at:** {row['resolved_at'].strftime('%Y-%m-%d %H:%M')}")
             if pd.notna(row['photo_url']):
                 st.image(row['photo_url'], width=300)
-                
+
         with cols[1]:
             st.write(f"**Current Status:** {row['status']}")
-            
+
         with cols[2]:
             if row['status'] == 'reported':
                 # Confirmation via checkbox before status change
