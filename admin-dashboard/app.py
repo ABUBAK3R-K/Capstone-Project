@@ -1,3 +1,5 @@
+from html import escape
+
 import pandas as pd
 import streamlit as st
 import folium
@@ -34,6 +36,12 @@ def fetch_reports():
     return pd.read_sql(query, conn)
 
 
+def is_http_url(value) -> bool:
+    """photo_url is client-supplied; only link it if it's a plain http(s) URL,
+    never e.g. a javascript: URL."""
+    return isinstance(value, str) and value.lower().startswith(("https://", "http://"))
+
+
 # --- Status Update Action with confirmation ---
 def advance_status(report_id, current_status):
     new_status = 'in_progress' if current_status == 'reported' else 'fixed'
@@ -54,6 +62,10 @@ def advance_status(report_id, current_status):
         fetch_reports.clear()
         st.rerun()
     except Exception as e:
+        # The connection is cached for the whole server process; without a
+        # rollback it stays in an aborted transaction and every later query
+        # fails until Streamlit restarts.
+        conn.rollback()
         st.error(f"Failed to update status: {e}")
 
 
@@ -104,10 +116,13 @@ if not filtered_df.empty:
 
     for idx, row in filtered_df.iterrows():
         color = colors.get(row['status'], 'blue')
-        description = row['description'] if pd.notna(row['description']) else ''
-        popup_html = f"<b>{row['category']}</b><br>Status: {row['status']}<br>{description}"
-        if pd.notna(row['photo_url']):
-            popup_html += f"<br><a href='{row['photo_url']}' target='_blank'>View Photo</a>"
+        # Every field here is citizen-written (the mobile app inserts it), and
+        # Folium renders popup strings as raw HTML — escape them, or a report
+        # description becomes script running in the authority's dashboard.
+        description = escape(row['description']) if pd.notna(row['description']) else ''
+        popup_html = f"<b>{escape(str(row['category']))}</b><br>Status: {escape(str(row['status']))}<br>{description}"
+        if is_http_url(row['photo_url']):
+            popup_html += f"<br><a href=\"{escape(row['photo_url'], quote=True)}\" target=\"_blank\" rel=\"noopener noreferrer\">View Photo</a>"
 
         folium.Marker(
             [row['lat'], row['lng']],
@@ -132,7 +147,7 @@ for idx, row in filtered_df.iterrows():
             st.write(f"**Coordinates:** {row['lat']:.5f}, {row['lng']:.5f}")
             if pd.notna(row.get('resolved_at')):
                 st.write(f"**Resolved at:** {row['resolved_at'].strftime('%Y-%m-%d %H:%M')}")
-            if pd.notna(row['photo_url']):
+            if is_http_url(row['photo_url']):
                 st.image(row['photo_url'], width=300)
 
         with cols[1]:

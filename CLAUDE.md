@@ -54,7 +54,7 @@ streamlit run app.py         # http://localhost:8501
 ```
 
 ### Supabase (`/supabase`)
-Apply `migrations/001_initial_schema.sql` through `007_rls_profiles_interactions.sql` **in order** against
+Apply `migrations/001_initial_schema.sql` through `009_business_hardening.sql` **in order** against
 a Supabase Cloud project's SQL editor, or locally via `supabase start && supabase db reset`. There is no
 single "run migrations" command in this repo — apply the numbered files sequentially.
 
@@ -66,9 +66,10 @@ cp .env.example .env
 python seed_places.py
 ```
 
-There is no test runner across the repo. `supabase/test_rls.sql` is a manual SQL script (run it directly
-against the DB, e.g. via `psql` or the Supabase SQL editor) that exercises `problem_reports` RLS policies;
-it does not cover the `profiles`/`interactions` policies added in migration `007`.
+There is no test runner across the repo. `supabase/test_rls.sql` is a self-checking SQL script (run the
+whole file as `postgres` via `psql` or the Supabase SQL editor, after all migrations) covering RLS and
+column grants on `problem_reports`, `profiles`, `interactions`, `businesses`, `bookings` and `places`. It
+raises `FAIL: …` on the first broken check, ends with `ALL RLS CHECKS PASSED`, and rolls everything back.
 
 ## Architecture
 
@@ -91,9 +92,18 @@ client-side rather than adding a migration to unpack it server-side.
 
 ### Security model
 RLS is the actual authorization boundary — not client-side checks. Key policies, mostly in
-`002_rls_and_functions.sql`, `006_profile_provisioning.sql`, `007_rls_profiles_interactions.sql`:
-- `places`: public read, authenticated insert.
-- `problem_reports`: insert requires `user_id = auth.uid()`; a regular user can only *read their own*
+`002_rls_and_functions.sql`, `006_profile_provisioning.sql`, `007_rls_profiles_interactions.sql`,
+`008_business_accounts.sql`, `009_business_hardening.sql`:
+- **Column locks need the 007/009 pattern**: `revoke all` on the table, then `grant` back only the writable
+  columns. A bare `revoke update (col)` is a no-op while Supabase's default table-level grant exists — that
+  is exactly how 008's `verification_status` lock failed and let businesses self-approve until 009.
+- `places`: public read; authenticated insert only as yourself (`created_by = auth.uid()`,
+  `source = 'user_added'`, no client-chosen `id`).
+- `businesses`: `verification_status` is admin-only (set over `DATABASE_URL` by the admin dashboard); a
+  trigger mirrors approved rows into `places` with the same id. `bookings`: clients can't set
+  `status`/`responded_at` on insert; owners can only update `status`, along `pending → confirmed|declined`,
+  `confirmed → completed` (enforced by trigger, which also validates service/business on insert).
+- `problem_reports`: insert requires `user_id = auth.uid()` and `status = 'reported'`; a regular user can only *read their own*
   reports (this is why the mobile Home screen is titled "Your reports nearby," not a city-wide feed —
   city-wide visibility would need a new `SECURITY DEFINER` RPC, deliberately not added); `authority`/`admin`
   roles can read all reports and are the only roles that can update status.
@@ -123,7 +133,13 @@ RLS is the actual authorization boundary — not client-side checks. Key policie
   the system has moved out of cold start for a given place.
 
 The full similarity matrix is computed once at FastAPI `lifespan` startup and rebuilt on demand via
-`POST /recommendations/refresh` (e.g. after reseeding) — it is not recomputed per-request.
+`POST /recommendations/refresh` (e.g. after reseeding; requires the `X-Admin-Key` header = `ADMIN_API_KEY`)
+— it is not recomputed per-request.
+
+The service writes over `DATABASE_URL`, which bypasses RLS, so `security.py` is its only write boundary:
+`POST /interactions` takes the user id from the caller's Supabase access token (verified against Supabase
+Auth's `/auth/v1/user`, needs `SUPABASE_URL`/`SUPABASE_ANON_KEY`), never from the request body, and fails
+closed with 503 if those aren't configured.
 
 `GET /health` actually pings the database (`SELECT 1` against the engine) and returns 503 with
 `database_connected: false` if it can't connect — a set-but-wrong `DATABASE_URL` no longer reports

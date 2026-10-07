@@ -114,13 +114,12 @@ export async function submitOrder(input: SubmitOrderInput): Promise<void> {
   if (error) throw error;
 }
 
-/** Business-owner action: accept/decline a pending booking, or mark a confirmed one completed. */
+/**
+ * Business-owner action: accept/decline a pending booking, or mark a confirmed one completed.
+ * Only `status` is client-writable (migration 009) — `responded_at` is stamped server-side
+ * and any other transition is rejected by the database.
+ */
 export async function updateBookingStatus(bookingId: string, status: BookingStatus): Promise<void> {
-  const respondedAt = status === 'confirmed' || status === 'declined' ? new Date().toISOString() : undefined;
-
-  const { error } = await supabase
-    .from('bookings')
-    .update({ status, ...(respondedAt ? { responded_at: respondedAt } : {}) })
-    .eq('id', bookingId);
+  const { error } = await supabase.from('bookings').update({ status }).eq('id', bookingId);
   if (error) throw error;
 }

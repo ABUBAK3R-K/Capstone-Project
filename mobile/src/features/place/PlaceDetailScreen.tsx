@@ -53,7 +53,7 @@ export function PlaceDetailScreen() {
 
   // Feeds the collaborative-filtering signal. Best-effort, never blocks render.
   useEffect(() => {
-    logInteraction(user?.id, place.id, 'view');
+    if (user) logInteraction(place.id, 'view');
   }, [place.id, user?.id]);
 
   // Hero parallax: the image drifts at half scroll speed and fades out, while

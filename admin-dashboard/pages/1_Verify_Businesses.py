@@ -42,6 +42,7 @@ def set_status(business_id, status):
         fetch_pending_businesses.clear()
         st.rerun()
     except Exception as e:
+        conn.rollback()  # see app.py: the cached connection must not stay aborted
         st.error(f"Failed to update verification status: {e}")
 
 
@@ -75,7 +76,15 @@ for _, row in df.iterrows():
             documents = row["verification_documents"] or []
             if not documents:
                 st.write("_None uploaded yet._")
+            # verification_documents is owner-writable (migration 008), so an
+            # owner could list another business's uploaded paths to borrow
+            # their paperwork. Storage policy only lets an owner upload under
+            # their own {business_id}/ folder, so anything outside it is suspect.
+            own_prefix = f"{row['id']}/"
             for path in documents:
+                if not str(path).startswith(own_prefix):
+                    st.warning(f"⚠️ `{path}` is not in this business's own folder — not uploaded by this owner. Do not rely on it.")
+                    continue
                 url = signed_document_url(path)
                 if url:
                     st.markdown(f"- [{path}]({url})")

@@ -54,6 +54,7 @@ def save_business(business_id, fields):
         fetch_businesses.clear()
         st.rerun()
     except Exception as e:
+        conn.rollback()  # see app.py: the cached connection must not stay aborted
         st.error(f"Failed to save changes: {e}")
 
 
