@@ -1,4 +1,4 @@
--- RLS + privilege test suite — covers migrations 002, 007, 008 and 009.
+-- RLS + privilege test suite — covers migrations 002, 007, 008, 009 and 011.
 --
 -- Run the whole file in the Supabase SQL editor or via psql, as the postgres
 -- role, AFTER applying every migration. It is self-checking: each check raises
@@ -370,9 +370,17 @@ begin
     'bookings: a valid booking starts pending with the service''s real type'
   );
 
-  update public.bookings set status = 'confirmed' where notes = 'rls-test';
-  get diagnostics n = row_count;
-  perform public._rls_expect(n = 0, 'bookings: a customer cannot confirm their own booking');
+  begin
+    update public.bookings set status = 'confirmed' where notes = 'rls-test';
+    perform public._rls_expect(false, 'bookings: a customer cannot confirm their own booking');
+  exception when check_violation then
+    perform public._rls_expect(true, 'bookings: a customer cannot confirm their own booking');
+  end;
+
+  -- A second booking, used by the cancellation checks (5b).
+  insert into public.bookings (business_id, customer_id, service_id, service_type, quantity, notes)
+  values ('b0000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-000000000001',
+          'c0000000-0000-0000-0000-000000000002', 'order', 2, 'rls-cancel');
 end $$;
 
 do $$
@@ -422,6 +430,60 @@ begin
   update public.bookings set status = 'completed' where notes = 'rls-test';
   get diagnostics n = row_count;
   perform public._rls_expect(n = 1, 'bookings: the owner can complete a confirmed booking');
+end $$;
+
+-- ════════════════════════════════════════════════════════════════════════
+-- 5b. Customer cancellation (011)
+-- ════════════════════════════════════════════════════════════════════════
+
+do $$
+begin
+  perform public._rls_test_login('a0000000-0000-0000-0000-000000000003');
+
+  begin
+    update public.bookings set status = 'cancelled' where notes = 'rls-cancel';
+    perform public._rls_expect(false, 'cancellation: the business cannot cancel on the customer''s behalf');
+  exception when check_violation then
+    perform public._rls_expect(true, 'cancellation: the business cannot cancel on the customer''s behalf');
+  end;
+end $$;
+
+do $$
+declare n int;
+begin
+  perform public._rls_test_login('a0000000-0000-0000-0000-000000000001');
+
+  update public.bookings set status = 'cancelled' where notes = 'rls-cancel';
+  get diagnostics n = row_count;
+  perform public._rls_expect(n = 1, 'cancellation: a customer can cancel their own pending booking');
+  perform public._rls_expect(
+    (select responded_at is null from public.bookings where notes = 'rls-cancel'),
+    'cancellation: cancelling does not count as a business response'
+  );
+
+  begin
+    update public.bookings set status = 'pending' where notes = 'rls-cancel';
+    perform public._rls_expect(false, 'cancellation: a cancelled booking cannot be reopened');
+  exception when check_violation then
+    perform public._rls_expect(true, 'cancellation: a cancelled booking cannot be reopened');
+  end;
+
+  begin
+    update public.bookings set status = 'cancelled' where notes = 'rls-test';
+    perform public._rls_expect(false, 'cancellation: a completed booking cannot be cancelled');
+  exception when check_violation then
+    perform public._rls_expect(true, 'cancellation: a completed booking cannot be cancelled');
+  end;
+end $$;
+
+do $$
+declare n int;
+begin
+  perform public._rls_test_login('a0000000-0000-0000-0000-000000000005');
+
+  update public.bookings set status = 'cancelled' where notes = 'rls-cancel';
+  get diagnostics n = row_count;
+  perform public._rls_expect(n = 0, 'cancellation: nobody else can touch the booking');
 end $$;
 
 -- ════════════════════════════════════════════════════════════════════════
