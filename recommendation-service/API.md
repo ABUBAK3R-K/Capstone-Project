@@ -6,12 +6,21 @@ Base URL: `http://<HOST>:8000` (default local: `http://localhost:8000`)
 
 ## `POST /interactions`
 
-Logs a user-place interaction. **The Flutter app must call this every time a user opens a Place Detail screen.**
+Logs a user-place interaction for the **signed-in user who owns the bearer token**. The mobile app
+calls this every time a user opens a Place Detail screen (`mobile/src/lib/recommendations.ts`).
+
+The user is taken from the verified Supabase access token, never from the request body: this service
+writes over `DATABASE_URL`, which bypasses RLS, so the token check (`security.py`) is the only thing
+stopping forged interaction history.
+
+### Headers
+| Header          | Required | Notes                                              |
+|-----------------|----------|----------------------------------------------------|
+| `Authorization` | yes      | `Bearer <Supabase access token>` of the signed-in user |
 
 ### Request Body
 ```json
 {
-  "user_id": "11111111-1111-1111-1111-111111111111",
   "place_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
   "interaction_type": "view"
 }
@@ -19,33 +28,30 @@ Logs a user-place interaction. **The Flutter app must call this every time a use
 
 | Field              | Type   | Required | Notes                                      |
 |--------------------|--------|----------|--------------------------------------------|
-| `user_id`          | string | yes      | The authenticated Supabase user UUID       |
-| `place_id`         | string | yes      | The UUID of the place being viewed         |
-| `interaction_type` | string | yes      | One of: `view`, `favorite`, `share`        |
+| `place_id`         | UUID   | yes      | The place being interacted with            |
+| `interaction_type` | string | yes      | One of: `view`, `favorite`, `visit`        |
 
-### Response `200 OK`
-```json
-{ "status": "ok" }
+### Responses
+| Status | When |
+|--------|------|
+| `200`  | `{ "status": "ok" }` |
+| `401`  | Missing, invalid, or expired token |
+| `422`  | `place_id` isn't a UUID, or `interaction_type` isn't one of the three allowed values |
+| `502`  | Supabase Auth couldn't be reached to verify the token |
+| `503`  | `SUPABASE_URL` / `SUPABASE_ANON_KEY` aren't configured — the endpoint fails closed |
+
+### Mobile usage
+```ts
+const { data } = await supabase.auth.getSession();
+await fetch(`${env.recommendationsUrl}/interactions`, {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${data.session?.access_token}`,
+  },
+  body: JSON.stringify({ place_id: placeId, interaction_type: 'view' }),
+});
 ```
-
-### Flutter Usage (for M2)
-```dart
-import 'package:http/http.dart' as http;
-import 'dart:convert';
-
-Future<void> logInteraction(String userId, String placeId) async {
-  await http.post(
-    Uri.parse('http://<HOST>:8000/interactions'),
-    headers: {'Content-Type': 'application/json'},
-    body: jsonEncode({
-      'user_id': userId,
-      'place_id': placeId,
-      'interaction_type': 'view',
-    }),
-  );
-}
-```
-Call this inside `PlaceDetailScreen.initState()`.
 
 ---
 
@@ -120,7 +126,13 @@ Returns interaction volume metrics. Use this to monitor when enough data has acc
 
 ## `POST /recommendations/refresh`
 
-Manually rebuilds the in-memory similarity matrix from the current database state. Call this after seeding new places.
+Manually rebuilds the in-memory similarity matrix from the current database state. Call this after
+seeding new places or approving businesses. It's an O(N²) rebuild, so it's an operator action: it
+requires the `X-Admin-Key` header to match `ADMIN_API_KEY`, and returns `503` if that variable isn't set.
+
+```bash
+curl -X POST http://localhost:8000/recommendations/refresh -H "X-Admin-Key: $ADMIN_API_KEY"
+```
 
 ### Response `200 OK`
 ```json
@@ -130,6 +142,7 @@ Manually rebuilds the in-memory similarity matrix from the current database stat
   "cached_places_count": 150
 }
 ```
+`403` if the key is missing or wrong.
 
 ---
 

@@ -1,6 +1,8 @@
 import os
 import logging
 from contextlib import asynccontextmanager
+from typing import Literal
+from uuid import UUID
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -9,6 +11,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import text
 
 from database import get_db, engine as db_engine
+from security import require_admin_key, require_user_id
 from recommendation.strategy import ContentProximityStrategy
 from recommendation.collaborative import CollaborativeFilteringStrategy, HybridStrategy
 from recommendation.service import RecommendationService
@@ -65,9 +68,9 @@ app.add_middleware(
 
 # --- Pydantic Models ---
 class InteractionRequest(BaseModel):
-    user_id: str
-    place_id: str
-    interaction_type: str  # e.g., 'view', 'favorite', 'visit'
+    # No user_id: it comes from the verified bearer token (see security.py).
+    place_id: UUID
+    interaction_type: Literal["view", "favorite", "visit"]  # mirrors the DB check constraint
 
 
 @app.get("/")
@@ -107,10 +110,15 @@ def health_check():
 
 
 @app.post("/interactions")
-def log_interaction(interaction: InteractionRequest, db: Session = Depends(get_db)):
+def log_interaction(
+    interaction: InteractionRequest,
+    user_id: str = Depends(require_user_id),
+    db: Session = Depends(get_db),
+):
     """
-    Logs a user-place interaction into the interactions table.
-    Called by the Flutter app whenever a user opens a place detail screen.
+    Logs a user-place interaction into the interactions table, attributed to
+    the user who owns the bearer token. Called by the mobile app whenever a
+    user opens a place detail screen.
     """
     try:
         db.execute(
@@ -119,15 +127,15 @@ def log_interaction(interaction: InteractionRequest, db: Session = Depends(get_d
                 VALUES (:user_id, :place_id, :interaction_type)
             """),
             {
-                "user_id": interaction.user_id,
-                "place_id": interaction.place_id,
+                "user_id": user_id,
+                "place_id": str(interaction.place_id),
                 "interaction_type": interaction.interaction_type,
             }
         )
         db.commit()
 
         logger.info(
-            f"INTERACTION | user={interaction.user_id} | place={interaction.place_id} | type={interaction.interaction_type}"
+            f"INTERACTION | user={user_id} | place={interaction.place_id} | type={interaction.interaction_type}"
         )
 
         return {"status": "ok"}
@@ -228,10 +236,11 @@ def get_recommendations(place_id: str, limit: int = 10, db: Session = Depends(ge
     }
 
 
-@app.post("/recommendations/refresh")
+@app.post("/recommendations/refresh", dependencies=[Depends(require_admin_key)])
 def refresh_recommendations(db: Session = Depends(get_db)):
     """
     Manually triggers a rebuild of the recommendation similarity matrix cache.
+    Requires the X-Admin-Key header (see security.py).
     """
     try:
         count = rec_service.refresh_cache(db)
