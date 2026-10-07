@@ -117,6 +117,31 @@ export function ProfileScreen() {
           </View>
         ) : null}
 
+        {/* ─── Contribute ────────────────────────────────────────────────── */}
+        {!isGuest ? (
+          <View style={styles.section}>
+            <Text variant="title" weight="bold">
+              Contribute
+            </Text>
+            <Card padded={false} onPress={() => navigation.navigate('AddPlace')} style={styles.bookingsCard}>
+              <View style={styles.bookingsRow}>
+                <View style={styles.bookingsIcon}>
+                  <Ionicons name="add-circle-outline" size={18} color={palette.primary} />
+                </View>
+                <View style={styles.bookingsCopy}>
+                  <Text variant="label" weight="semibold">
+                    Add a place
+                  </Text>
+                  <Text variant="caption" tone="muted">
+                    Put a missing shop, park or landmark on the map
+                  </Text>
+                </View>
+                <Ionicons name="chevron-forward" size={17} color={palette.inkFaint} />
+              </View>
+            </Card>
+          </View>
+        ) : null}
+
         {/* ─── Service status ────────────────────────────────────────────────
             Surfaced here rather than hidden in logs: an unconfigured service
             silently degrades a whole screen, and this says which one. */}

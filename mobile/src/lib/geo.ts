@@ -28,7 +28,10 @@ export function formatDistance(meters: number): string {
   if (!Number.isFinite(meters)) return '';
   if (meters < 950) return `${Math.round(meters / 10) * 10} m`;
   const km = meters / 1000;
-  return km < 10 ? `${km.toFixed(1)} km` : `${Math.round(km)} km`;
+  // Round arithmetically rather than with toFixed alone: 0.95.toFixed(1) is
+  // "0.9" (binary floating point), which made 950 m read as less than 940 m.
+  const tenths = Math.round(km * 10) / 10;
+  return tenths < 10 ? `${tenths.toFixed(1)} km` : `${Math.round(km)} km`;
 }
 
 /**

@@ -14,13 +14,14 @@ interface HomeHeaderProps {
   locationLabel: string;
   isFallback: boolean;
   onPressLocation: () => void;
+  onPressSearch: () => void;
 }
 
 /**
  * Ink header that the feed scrolls under. Gives the Home screen a top edge with
  * some weight, so the first card is not floating against bare canvas.
  */
-export function HomeHeader({ greeting, locationLabel, isFallback, onPressLocation }: HomeHeaderProps) {
+export function HomeHeader({ greeting, locationLabel, isFallback, onPressLocation, onPressSearch }: HomeHeaderProps) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -55,6 +56,20 @@ export function HomeHeader({ greeting, locationLabel, isFallback, onPressLocatio
           </Text>
           <Ionicons name="refresh" size={12} color={palette.onInkFaint} />
         </Pressable>
+
+        {/* Looks like a field, behaves like a button: the real input lives on
+            the Search screen, so the keyboard never covers the Home feed. */}
+        <Pressable
+          accessibilityRole="search"
+          accessibilityLabel="Search places"
+          onPress={onPressSearch}
+          style={({ pressed }) => [styles.searchBar, pressed && styles.pressed]}
+        >
+          <Ionicons name="search" size={17} color={palette.inkMuted} />
+          <Text variant="body" tone="muted">
+            Search shops, parks, temples…
+          </Text>
+        </Pressable>
       </Animated.View>
     </LinearGradient>
   );
@@ -81,4 +96,15 @@ const styles = StyleSheet.create({
     backgroundColor: palette.onInkSurface,
   },
   locationText: { color: palette.onInk, maxWidth: 240 },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing.md,
+    height: 48,
+    marginTop: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: radius.pill,
+    backgroundColor: palette.surface,
+  },
+  pressed: { opacity: 0.85 },
 });

@@ -84,6 +84,7 @@ export function HomeScreen() {
           locationLabel={locationLabel}
           isFallback={isFallback}
           onPressLocation={retry}
+          onPressSearch={() => navigation.navigate('Search')}
         />
 
         {/* ─── Nearby categories ─────────────────────────────────────────── */}

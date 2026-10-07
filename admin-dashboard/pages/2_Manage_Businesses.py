@@ -3,6 +3,7 @@ import streamlit as st
 
 from lib.auth import render_account_sidebar, require_auth
 from lib.db import get_connection
+from lib.recommendations import trigger_refresh
 
 st.set_page_config(page_title="Manage Businesses — City Guide Admin", layout="wide")
 
@@ -51,6 +52,10 @@ def save_business(business_id, fields):
         )
         conn.commit()
         cur.close()
+        # Name/category/description/status all feed the mirrored `places`
+        # row, and therefore the content-similarity model.
+        if trigger_refresh():
+            st.toast("Recommendations are refreshing in the background.")
         fetch_businesses.clear()
         st.rerun()
     except Exception as e:

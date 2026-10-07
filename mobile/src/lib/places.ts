@@ -1,5 +1,5 @@
 import { supabase } from './supabase';
-import { parsePostgisPoint, type LatLng } from './geo';
+import { parsePostgisPoint, toGeoJsonPoint, type LatLng } from './geo';
 import type { Place, ProblemReport } from '@/types/place';
 
 export const DEFAULT_RADIUS_M = 5_000;
@@ -27,7 +27,8 @@ export async function fetchNearbyPlaces(
 
 /**
  * `search_places(search_query, lat, lng)` — note the parameter is named
- * `search_query`, not `query`.
+ * `search_query`, not `query`. Matches name, description, category and type;
+ * returns at most the 50 nearest matches (migration 010).
  */
 export async function searchPlaces(query: string, center: LatLng): Promise<Place[]> {
   const trimmed = query.trim();
@@ -41,6 +42,58 @@ export async function searchPlaces(query: string, center: LatLng): Promise<Place
 
   if (error) throw error;
   return (data ?? []) as Place[];
+}
+
+export interface ContributePlaceInput {
+  userId: string;
+  name: string;
+  category: string;
+  subcategory: string;
+  description: string;
+  address: string;
+  location: LatLng;
+}
+
+/**
+ * Community curation: a signed-in user adds a place to the shared catalogue.
+ * The insert policy (migration 009) only accepts rows credited to the caller
+ * (`created_by = auth.uid()`) with `source = 'user_added'`, and the id is
+ * always server-generated.
+ *
+ * Returns the new row in the same shape the RPCs produce, so the caller can
+ * open it straight away without a refetch.
+ */
+export async function contributePlace(input: ContributePlaceInput): Promise<Place> {
+  const row = {
+    name: input.name.trim(),
+    category: input.category,
+    subcategory: input.subcategory.trim() || null,
+    description: input.description.trim() || null,
+    address: input.address.trim() || null,
+  };
+
+  const { data, error } = await supabase
+    .from('places')
+    .insert({
+      ...row,
+      location: toGeoJsonPoint(input.location),
+      source: 'user_added',
+      created_by: input.userId,
+    })
+    .select('id, created_at')
+    .single();
+
+  if (error) throw error;
+  return {
+    ...row,
+    id: data.id as string,
+    created_at: data.created_at as string,
+    created_by: input.userId,
+    lat: input.location.lat,
+    lng: input.location.lng,
+    images: null,
+    source: 'user_added',
+  };
 }
 
 /**

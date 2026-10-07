@@ -1,5 +1,3 @@
-from html import escape
-
 import pandas as pd
 import streamlit as st
 import folium
@@ -7,6 +5,7 @@ from streamlit_folium import st_folium
 
 from lib.auth import require_auth, render_account_sidebar
 from lib.db import get_connection
+from lib.html_safety import is_http_url, report_popup_html
 
 st.set_page_config(page_title="City Guide Admin", layout="wide")
 
@@ -34,12 +33,6 @@ def fetch_reports():
     ORDER BY created_at DESC
     """
     return pd.read_sql(query, conn)
-
-
-def is_http_url(value) -> bool:
-    """photo_url is client-supplied; only link it if it's a plain http(s) URL,
-    never e.g. a javascript: URL."""
-    return isinstance(value, str) and value.lower().startswith(("https://", "http://"))
 
 
 # --- Status Update Action with confirmation ---
@@ -116,13 +109,13 @@ if not filtered_df.empty:
 
     for idx, row in filtered_df.iterrows():
         color = colors.get(row['status'], 'blue')
-        # Every field here is citizen-written (the mobile app inserts it), and
-        # Folium renders popup strings as raw HTML — escape them, or a report
-        # description becomes script running in the authority's dashboard.
-        description = escape(row['description']) if pd.notna(row['description']) else ''
-        popup_html = f"<b>{escape(str(row['category']))}</b><br>Status: {escape(str(row['status']))}<br>{description}"
-        if is_http_url(row['photo_url']):
-            popup_html += f"<br><a href=\"{escape(row['photo_url'], quote=True)}\" target=\"_blank\" rel=\"noopener noreferrer\">View Photo</a>"
+        # Citizen-written fields rendered as HTML — see lib/html_safety.py.
+        popup_html = report_popup_html(
+            row['category'],
+            row['status'],
+            row['description'] if pd.notna(row['description']) else None,
+            row['photo_url'] if pd.notna(row['photo_url']) else None,
+        )
 
         folium.Marker(
             [row['lat'], row['lng']],

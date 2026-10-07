@@ -114,6 +114,12 @@ export async function submitOrder(input: SubmitOrderInput): Promise<void> {
   if (error) throw error;
 }
 
+/** Customer action: withdraw a pending or confirmed booking (migration 011). */
+export async function cancelBooking(bookingId: string): Promise<void> {
+  const { error } = await supabase.from('bookings').update({ status: 'cancelled' }).eq('id', bookingId);
+  if (error) throw error;
+}
+
 /**
  * Business-owner action: accept/decline a pending booking, or mark a confirmed one completed.
  * Only `status` is client-writable (migration 009) — `responded_at` is stamped server-side

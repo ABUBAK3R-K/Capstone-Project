@@ -3,6 +3,7 @@ import streamlit as st
 
 from lib.auth import render_account_sidebar, require_auth
 from lib.db import get_connection
+from lib.recommendations import trigger_refresh
 from lib.storage import signed_document_url
 
 st.set_page_config(page_title="Verify Businesses — City Guide Admin", layout="wide")
@@ -38,7 +39,10 @@ def set_status(business_id, status):
         cur.close()
         # The places-mirroring trigger (supabase/migrations/008) reacts to
         # this update automatically — approving inserts into `places`,
-        # anything else removes it. No separate places write needed here.
+        # anything else removes it. No separate places write needed here,
+        # but the recommender must rebuild to see the change.
+        if trigger_refresh():
+            st.toast("Recommendations are refreshing in the background.")
         fetch_pending_businesses.clear()
         st.rerun()
     except Exception as e:

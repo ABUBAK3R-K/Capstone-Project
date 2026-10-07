@@ -22,8 +22,8 @@ import { screenGutter } from '@/design/components/Screen';
 import { palette, radius, shadows, spacing } from '@/design/tokens';
 import { categoryMeta } from '@/constants/categories';
 import { hasRecommendationService } from '@/lib/env';
-import { logInteraction } from '@/lib/recommendations';
-import { useSimilarPlaces } from '@/hooks/usePlaces';
+import { logInteraction } from '@/lib/interactions';
+import { useMarkPlace, usePlaceMarks, useSimilarPlaces } from '@/hooks/usePlaces';
 import { useBusinessDetail } from '@/hooks/useBusiness';
 import type { RootStackParamList } from '@/navigation/types';
 import { BusinessSection } from './components/BusinessSection';
@@ -53,8 +53,15 @@ export function PlaceDetailScreen() {
 
   // Feeds the collaborative-filtering signal. Best-effort, never blocks render.
   useEffect(() => {
-    if (user) logInteraction(place.id, 'view');
+    if (user) logInteraction(user.id, place.id, 'view');
   }, [place.id, user?.id]);
+
+  // Stronger implicit signals than a view (weights 2 and 3 in the
+  // collaborative model). One-way: the interaction log is append-only.
+  const { data: marks } = usePlaceMarks(user?.id, place.id);
+  const markPlace = useMarkPlace(user?.id, place.id);
+  const saved = marks?.saved ?? false;
+  const visited = marks?.visited ?? false;
 
   // Hero parallax: the image drifts at half scroll speed and fades out, while
   // the floating back button gains a solid background once it leaves the image.
@@ -150,6 +157,30 @@ export function PlaceDetailScreen() {
             </Pressable>
           </View>
 
+          {user ? (
+            <View style={styles.actions}>
+              <MarkButton
+                icon={saved ? 'heart' : 'heart-outline'}
+                label={saved ? 'Saved' : 'Save'}
+                active={saved}
+                disabled={saved || markPlace.isPending}
+                onPress={() => markPlace.mutate('favorite')}
+              />
+              <MarkButton
+                icon={visited ? 'checkmark-done-circle' : 'checkmark-done-circle-outline'}
+                label={visited ? 'Visited' : "I've been here"}
+                active={visited}
+                disabled={visited || markPlace.isPending}
+                onPress={() => markPlace.mutate('visit')}
+              />
+            </View>
+          ) : null}
+          {markPlace.isError ? (
+            <Text variant="caption" tone="danger">
+              Couldn't save that — check your connection and try again.
+            </Text>
+          ) : null}
+
           {place.description ? (
             <View style={styles.block}>
               <Text variant="heading" weight="semibold">
@@ -214,6 +245,39 @@ export function PlaceDetailScreen() {
   );
 }
 
+function MarkButton({
+  icon,
+  label,
+  active,
+  disabled,
+  onPress,
+}: {
+  icon: keyof typeof Ionicons.glyphMap;
+  label: string;
+  active: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityState={{ selected: active, disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.action,
+        active ? styles.actionMarked : styles.actionSecondary,
+        pressed && styles.pressed,
+      ]}
+    >
+      <Ionicons name={icon} size={17} color={active ? palette.primary : palette.ink} />
+      <Text variant="label" weight="semibold" tone={active ? 'primary' : 'default'}>
+        {label}
+      </Text>
+    </Pressable>
+  );
+}
+
 function DetailRow({
   icon,
   label,
@@ -268,6 +332,11 @@ const styles = StyleSheet.create({
     backgroundColor: palette.surface,
     borderWidth: StyleSheet.hairlineWidth * 2,
     borderColor: palette.borderStrong,
+  },
+  actionMarked: {
+    backgroundColor: palette.primarySoft,
+    borderWidth: StyleSheet.hairlineWidth * 2,
+    borderColor: palette.primaryBorder,
   },
   pressed: { opacity: 0.8 },
   block: { gap: spacing.md },

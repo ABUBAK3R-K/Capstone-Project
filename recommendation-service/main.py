@@ -1,6 +1,7 @@
+import asyncio
 import os
 import logging
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Literal
 from uuid import UUID
 from fastapi import FastAPI, Depends, HTTPException
@@ -30,23 +31,55 @@ collab_strategy = CollaborativeFilteringStrategy(factors=50, iterations=15)
 hybrid_strategy = HybridStrategy(content_strategy, collab_strategy, blend=0.5)
 rec_service = RecommendationService(strategy=hybrid_strategy)
 
+# Periodic background rebuild, so places added after startup (community
+# contributions, newly approved businesses) start getting recommendations
+# without anyone calling /refresh. 0 or unset disables it.
+REFRESH_INTERVAL_MINUTES = float(os.getenv("REFRESH_INTERVAL_MINUTES", "0") or 0)
+
+
+def _refresh_with_new_session() -> int:
+    db = next(get_db())
+    try:
+        return rec_service.refresh_cache(db)
+    finally:
+        db.close()
+
+
+async def _refresh_periodically(interval_seconds: float):
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            # The O(N^2) build is CPU/DB-bound; keep it off the event loop so
+            # requests are still served while it runs.
+            count = await asyncio.to_thread(_refresh_with_new_session)
+            logger.info(f"Periodic refresh: rebuilt for {count} places.")
+        except Exception as e:
+            logger.error(f"Periodic refresh failed - {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: prepopulate cache
     try:
         if os.getenv("DATABASE_URL"):
-            db = next(get_db())
-            try:
-                count = rec_service.refresh_cache(db)
-                logger.info(f"Startup: Cached recommendations for {count} places.")
-            finally:
-                db.close()
+            count = _refresh_with_new_session()
+            logger.info(f"Startup: Cached recommendations for {count} places.")
         else:
             logger.warning("Startup: DATABASE_URL not set, skipping cache prepopulation.")
     except Exception as e:
         logger.error(f"Startup: Failed to prepopulate cache - {e}")
-    
+
+    refresher = None
+    if REFRESH_INTERVAL_MINUTES > 0 and os.getenv("DATABASE_URL"):
+        refresher = asyncio.create_task(_refresh_periodically(REFRESH_INTERVAL_MINUTES * 60))
+        logger.info(f"Startup: periodic refresh every {REFRESH_INTERVAL_MINUTES:g} min.")
+
     yield
+
+    if refresher:
+        refresher.cancel()
+        with suppress(asyncio.CancelledError):
+            await refresher
 
 # Initialize FastAPI application
 app = FastAPI(
@@ -60,7 +93,9 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    # Auth is a bearer token in the Authorization header, never a cookie, so
+    # credentialed CORS isn't needed — and must not be combined with "*".
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -183,8 +218,9 @@ def get_recommendations(place_id: str, limit: int = 10, db: Session = Depends(ge
     Get top-N similar places for a given place_id.
     Returns fully hydrated place data with scoring path info.
     """
-    raw_results = rec_service.get_similar_places(place_id, limit=limit)
-    scoring_path = rec_service.last_scoring_path
+    result = rec_service.get_similar_places(place_id, limit=limit)
+    raw_results = result.recommendations
+    scoring_path = result.scoring_path
 
     if not raw_results:
         raise HTTPException(status_code=404, detail="Place not found in cache or cache is empty.")

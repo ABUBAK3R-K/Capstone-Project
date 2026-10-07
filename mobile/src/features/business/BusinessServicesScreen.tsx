@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { useAuth } from '@/providers/AuthProvider';
@@ -11,7 +11,8 @@ import { Screen, screenGutter } from '@/design/components/Screen';
 import { SectionHeader } from '@/design/components/SectionHeader';
 import { Text } from '@/design/typography';
 import { fontFamily, palette, radius, spacing, typeScale } from '@/design/tokens';
-import { createBusinessService, deleteBusinessService, setServiceActive } from '@/lib/businesses';
+import { createBusinessService, removeBusinessService, setServiceActive } from '@/lib/businesses';
+import { errorMessage } from '@/lib/errors';
 import { useBusinessServices, useInvalidateBusiness, useOwnBusiness } from '@/hooks/useBusiness';
 import type { ServiceType } from '@/types/business';
 
@@ -119,8 +120,12 @@ export function BusinessServicesScreen() {
                     variant="ghost"
                     size="sm"
                     onPress={async () => {
-                      await setServiceActive(service.id, !service.is_active);
-                      await invalidateServices(business.id);
+                      try {
+                        await setServiceActive(service.id, !service.is_active);
+                        await invalidateServices(business.id);
+                      } catch (caught) {
+                        Alert.alert('Could not update service', errorMessage(caught));
+                      }
                     }}
                   />
                   <Button
@@ -128,8 +133,18 @@ export function BusinessServicesScreen() {
                     variant="ghost"
                     size="sm"
                     onPress={async () => {
-                      await deleteBusinessService(service.id);
-                      await invalidateServices(business.id);
+                      try {
+                        const outcome = await removeBusinessService(service.id);
+                        await invalidateServices(business.id);
+                        if (outcome === 'hidden') {
+                          Alert.alert(
+                            'Service hidden instead',
+                            'Customers have booked this service, so it was hidden from your menu rather than deleted — their booking history stays intact.',
+                          );
+                        }
+                      } catch (caught) {
+                        Alert.alert('Could not delete service', errorMessage(caught));
+                      }
                     }}
                   />
                 </View>

@@ -7,6 +7,8 @@ import { WelcomeScreen } from '@/features/auth/WelcomeScreen';
 import { AuthScreen } from '@/features/auth/AuthScreen';
 import { BusinessAuthScreen } from '@/features/auth/BusinessAuthScreen';
 import { PlaceDetailScreen } from '@/features/place/PlaceDetailScreen';
+import { AddPlaceScreen } from '@/features/place/AddPlaceScreen';
+import { SearchScreen } from '@/features/search/SearchScreen';
 import { BookingFlowScreen } from '@/features/booking/BookingFlowScreen';
 import { OrderFlowScreen } from '@/features/booking/OrderFlowScreen';
 import { MyBookingsScreen } from '@/features/profile/MyBookingsScreen';
@@ -71,6 +73,8 @@ export function RootNavigator() {
               component={PlaceDetailScreen}
               options={{ animation: 'slide_from_bottom' }}
             />
+            <Stack.Screen name="Search" component={SearchScreen} options={{ animation: 'fade' }} />
+            <Stack.Screen name="AddPlace" component={AddPlaceScreen} />
             <Stack.Screen name="BookingFlow" component={BookingFlowScreen} />
             <Stack.Screen name="OrderFlow" component={OrderFlowScreen} />
             <Stack.Screen name="MyBookings" component={MyBookingsScreen} />

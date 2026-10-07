@@ -18,6 +18,7 @@ const STATUS_META: Record<BookingStatus, { label: string; color: string }> = {
   confirmed: { label: 'Confirmed', color: palette.success },
   declined: { label: 'Declined', color: palette.danger },
   completed: { label: 'Completed', color: palette.accent },
+  cancelled: { label: 'Cancelled', color: palette.inkMuted },
 };
 
 export function BusinessBookingsScreen() {

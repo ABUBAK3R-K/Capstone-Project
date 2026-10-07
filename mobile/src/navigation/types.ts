@@ -24,6 +24,9 @@ export type RootStackParamList = {
   Tabs: NavigatorScreenParams<TabParamList>;
   BusinessTabs: NavigatorScreenParams<BusinessTabParamList>;
   PlaceDetail: { place: Place };
+  Search: undefined;
+  /** `name` pre-fills the form, e.g. from a search that found nothing. */
+  AddPlace: { name?: string } | undefined;
   BookingFlow: { business: Business; service: BusinessService };
   OrderFlow: { business: Business; services: BusinessService[] };
   MyBookings: undefined;

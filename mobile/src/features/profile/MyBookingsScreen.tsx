@@ -1,16 +1,18 @@
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 
 import { useAuth } from '@/providers/AuthProvider';
 import { Badge } from '@/design/components/Badge';
+import { Button } from '@/design/components/Button';
 import { Card } from '@/design/components/Card';
 import { EmptyState } from '@/design/components/EmptyState';
 import { Screen, screenGutter } from '@/design/components/Screen';
 import { Text } from '@/design/typography';
 import { palette, spacing } from '@/design/tokens';
-import { useCustomerBookings } from '@/hooks/useBusiness';
+import { useCancelBooking, useCustomerBookings } from '@/hooks/useBusiness';
+import { errorMessage } from '@/lib/errors';
 import type { RootStackParamList } from '@/navigation/types';
 import type { Booking, BookingStatus } from '@/types/business';
 
@@ -21,7 +23,11 @@ const STATUS_META: Record<BookingStatus, { label: string; color: string }> = {
   confirmed: { label: 'Confirmed', color: palette.success },
   declined: { label: 'Declined', color: palette.danger },
   completed: { label: 'Completed', color: palette.accent },
+  cancelled: { label: 'Cancelled', color: palette.inkMuted },
 };
+
+/** Mirrors the customer transitions allowed by migration 011. */
+const CANCELLABLE: ReadonlySet<BookingStatus> = new Set<BookingStatus>(['pending', 'confirmed']);
 
 /**
  * There is no push notification path in this app, so "did the business
@@ -32,6 +38,25 @@ export function MyBookingsScreen() {
   const navigation = useNavigation<Navigation>();
   const { user } = useAuth();
   const { data: bookings, isLoading } = useCustomerBookings(user?.id);
+  const cancel = useCancelBooking(user?.id);
+
+  const confirmCancel = (booking: Booking) => {
+    Alert.alert(
+      'Cancel this booking?',
+      `${booking.business_name ?? 'The business'} will see it as cancelled. This can't be undone.`,
+      [
+        { text: 'Keep booking', style: 'cancel' },
+        {
+          text: 'Cancel booking',
+          style: 'destructive',
+          onPress: () =>
+            cancel.mutate(booking.id, {
+              onError: (caught) => Alert.alert('Could not cancel', errorMessage(caught)),
+            }),
+        },
+      ],
+    );
+  };
 
   return (
     <Screen>
@@ -60,7 +85,12 @@ export function MyBookingsScreen() {
       ) : (
         <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
           {(bookings ?? []).map((booking) => (
-            <BookingRow key={booking.id} booking={booking} />
+            <BookingRow
+              key={booking.id}
+              booking={booking}
+              cancelling={cancel.isPending && cancel.variables === booking.id}
+              onCancel={() => confirmCancel(booking)}
+            />
           ))}
         </ScrollView>
       )}
@@ -68,7 +98,15 @@ export function MyBookingsScreen() {
   );
 }
 
-function BookingRow({ booking }: { booking: Booking }) {
+function BookingRow({
+  booking,
+  cancelling,
+  onCancel,
+}: {
+  booking: Booking;
+  cancelling: boolean;
+  onCancel: () => void;
+}) {
   const meta = STATUS_META[booking.status];
 
   return (
@@ -91,6 +129,17 @@ function BookingRow({ booking }: { booking: Booking }) {
             : 'Time not set'
           : `Qty ${booking.quantity}`}
       </Text>
+      {CANCELLABLE.has(booking.status) ? (
+        <Button
+          label="Cancel booking"
+          variant="ghost"
+          size="sm"
+          icon="close-circle-outline"
+          loading={cancelling}
+          onPress={onCancel}
+          style={styles.cancelButton}
+        />
+      ) : null}
     </Card>
   );
 }
@@ -109,4 +158,5 @@ const styles = StyleSheet.create({
   card: { gap: spacing.sm },
   cardHeader: { flexDirection: 'row', justifyContent: 'space-between', gap: spacing.md },
   cardCopy: { flex: 1, gap: spacing.xxs },
+  cancelButton: { alignSelf: 'flex-start' },
 });

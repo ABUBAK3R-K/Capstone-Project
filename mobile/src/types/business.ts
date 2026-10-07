@@ -54,7 +54,7 @@ export interface BusinessService {
   created_at: string;
 }
 
-export type BookingStatus = 'pending' | 'confirmed' | 'declined' | 'completed';
+export type BookingStatus = 'pending' | 'confirmed' | 'declined' | 'completed' | 'cancelled';
 
 export interface Booking {
   id: string;

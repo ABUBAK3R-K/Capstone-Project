@@ -162,7 +162,7 @@ export function ReportScreen() {
             </Text>
             <Text variant="body" tone="muted" align="center">
               It is now visible to the authorities handling {category.toLowerCase()} issues. You can
-              track its status on your Home feed.
+              track its status on your Profile.
             </Text>
           </View>
           <View style={styles.successActions}>

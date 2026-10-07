@@ -217,7 +217,21 @@ export async function setServiceActive(serviceId: string, isActive: boolean): Pr
   if (error) throw error;
 }
 
-export async function deleteBusinessService(serviceId: string): Promise<void> {
+/** Postgres foreign_key_violation — the service is referenced by bookings. */
+const FOREIGN_KEY_VIOLATION = '23503';
+
+/**
+ * Deletes a service, or hides it if bookings reference it. Past bookings
+ * point at their service row (008), so deleting a booked service is
+ * refused by the database; hiding it keeps that history intact while
+ * removing it from the customer-facing menu, which is what "delete" means
+ * to the owner.
+ */
+export async function removeBusinessService(serviceId: string): Promise<'deleted' | 'hidden'> {
   const { error } = await supabase.from('business_services').delete().eq('id', serviceId);
-  if (error) throw error;
+  if (!error) return 'deleted';
+  if (error.code !== FOREIGN_KEY_VIOLATION) throw error;
+
+  await setServiceActive(serviceId, false);
+  return 'hidden';
 }

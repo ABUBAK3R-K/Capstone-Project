@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
   fetchActiveBusinessServices,
@@ -6,7 +6,7 @@ import {
   fetchBusinessById,
   fetchOwnBusiness,
 } from '@/lib/businesses';
-import { fetchBusinessBookings, fetchCustomerBookings } from '@/lib/bookings';
+import { cancelBooking, fetchBusinessBookings, fetchCustomerBookings } from '@/lib/bookings';
 
 export function useOwnBusiness(ownerId: string | undefined) {
   return useQuery({
@@ -65,6 +65,14 @@ export function useBusinessBookings(businessId: string | undefined) {
     enabled: Boolean(businessId),
     staleTime: 15 * 1000,
     refetchInterval: 20 * 1000,
+  });
+}
+
+export function useCancelBooking(customerId: string | undefined) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: cancelBooking,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['customer-bookings', customerId] }),
   });
 }
 
