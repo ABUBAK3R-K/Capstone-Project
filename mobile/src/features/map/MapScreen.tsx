@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Platform, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import MapView, { Marker, PROVIDER_DEFAULT, UrlTile, type Region } from 'react-native-maps';
+import { WebView } from 'react-native-webview';
 import { Ionicons } from '@expo/vector-icons';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -29,9 +29,9 @@ export function MapScreen() {
   const navigation = useNavigation<Navigation>();
   const route = useRoute<MapRoute>();
   const insets = useSafeAreaInsets();
-  const mapRef = useRef<MapView>(null);
+  const webViewRef = useRef<WebView>(null);
 
-  const { center, isResolving, isFallback, retry } = useLocation();
+  const { center, isResolving, isFallback, retry, override } = useLocation();
   const [category, setCategory] = useState<string | null>(null);
   const [selected, setSelected] = useState<Place | null>(null);
 
@@ -48,15 +48,22 @@ export function MapScreen() {
 
   const places = data ?? [];
 
-  const region = useMemo<Region>(() => regionForRadius(center, DEFAULT_RADIUS_M), [center]);
 
-  // Re-centre when a real fix arrives after the map has already mounted.
   useEffect(() => {
-    if (!isResolving) mapRef.current?.animateToRegion(region, 600);
-  }, [isResolving, region]);
+    if (!isResolving) {
+      webViewRef.current?.injectJavaScript(`
+        if (window.map) map.setView([${center.lat}, ${center.lng}]);
+        if (window.userMarker) window.userMarker.setLatLng([${center.lat}, ${center.lng}]);
+        true;
+      `);
+    }
+  }, [isResolving, center]);
 
   const recenter = useCallback(() => {
-    mapRef.current?.animateToRegion(regionForRadius(center, DEFAULT_RADIUS_M), 450);
+    webViewRef.current?.injectJavaScript(`
+      if (window.map) map.flyTo([${center.lat}, ${center.lng}], 14);
+      true;
+    `);
   }, [center]);
 
   const selectCategory = useCallback((next: string | null) => {
@@ -66,51 +73,74 @@ export function MapScreen() {
 
   return (
     <View style={styles.root}>
-      <MapView
-        ref={mapRef}
-        style={StyleSheet.absoluteFill}
-        provider={PROVIDER_DEFAULT}
-        initialRegion={region}
-        showsUserLocation={!isFallback}
-        showsMyLocationButton={false}
-        showsCompass={false}
-        toolbarEnabled={false}
-        onPress={() => setSelected(null)}
-        // On Android the Google basemap must be switched off, otherwise it
-        // renders underneath and fights with the OSM-style raster tiles.
-        mapType={hasMapTiles && Platform.OS === 'android' ? 'none' : 'standard'}
-      >
-        {/*
-          Hosted OSM-style raster tiles (Mapbox / MapTiler / Stadia).
-          Never point this at tile.openstreetmap.org — react-native-maps blocks
-          OSM's own tile servers on Android. See mobile/.env.example.
-        */}
-        {hasMapTiles ? (
-          <UrlTile
-            urlTemplate={env.mapTileUrl}
-            maximumZ={19}
-            flipY={false}
-            shouldReplaceMapContent
-            tileSize={env.mapTileSize}
-          />
-        ) : null}
+      <WebView
+        ref={webViewRef}
+        style={[StyleSheet.absoluteFill, { width: '100%', height: '100%' }]}
+        source={{
+          html: `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+              <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+              <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+              <style>
+                body { padding: 0; margin: 0; background-color: #f7f7f7; }
+                html, body, #map { height: 100%; width: 100vw; }
+                .leaflet-control-attribution { display: none !important; }
+              </style>
+            </head>
+            <body>
+              <div id="map"></div>
+              <script>
+                var map = L.map('map', { zoomControl: false }).setView([${center.lat}, ${center.lng}], 14);
+                L.tileLayer('https://tile.openstreetmap.de/{z}/{x}/{y}.png', {
+                  maxZoom: 19,
+                }).addTo(map);
 
-        {places.map((place) => (
-          <Marker
-            key={place.id}
-            coordinate={{ latitude: place.lat, longitude: place.lng }}
-            onPress={(event) => {
-              // Stop the tap from also hitting MapView.onPress and clearing us.
-              event.stopPropagation();
-              setSelected(place);
-            }}
-            tracksViewChanges={false}
-            anchor={{ x: 0.5, y: 1 }}
-          >
-            <CategoryMarker category={place.category} selected={selected?.id === place.id} />
-          </Marker>
-        ))}
-      </MapView>
+                // User location dot (blue)
+                var userIcon = L.divIcon({
+                  html: '<div style="background-color: #007AFF; width: 16px; height: 16px; border-radius: 50%; border: 3px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>',
+                  className: '',
+                  iconSize: [22, 22],
+                  iconAnchor: [11, 11]
+                });
+                window.userMarker = L.marker([${center.lat}, ${center.lng}], { icon: userIcon, zIndexOffset: 1000 }).addTo(map);
+
+                var places = ${JSON.stringify(places)};
+                places.forEach(function(place) {
+                  var marker = L.marker([place.lat, place.lng]).addTo(map);
+                  marker.on('click', function() {
+                    window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'select', id: place.id }));
+                  });
+                });
+
+                map.on('click', function() {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'deselect' }));
+                });
+
+                map.on('contextmenu', function(e) {
+                  window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'longpress', lat: e.latlng.lat, lng: e.latlng.lng }));
+                });
+              </script>
+            </body>
+            </html>
+          `,
+        }}
+        onMessage={(event) => {
+          try {
+            const data = JSON.parse(event.nativeEvent.data);
+            if (data.type === 'select') {
+              const place = places.find(p => p.id === data.id);
+              if (place) setSelected(place);
+            } else if (data.type === 'deselect') {
+              setSelected(null);
+            } else if (data.type === 'longpress') {
+              override(data.lat, data.lng);
+            }
+          } catch (e) {}
+        }}
+      />
 
       {/* ─── Filter chips ──────────────────────────────────────────────── */}
       <View style={[styles.chipBar, { paddingTop: insets.top + spacing.sm }]} pointerEvents="box-none">
@@ -153,14 +183,6 @@ export function MapScreen() {
       </View>
 
       {/* ─── Failure / empty overlays ──────────────────────────────────── */}
-      {!hasMapTiles ? (
-        <View style={[styles.notice, { top: insets.top + 110 }]} pointerEvents="none">
-          <Ionicons name="layers-outline" size={14} color={palette.warning} />
-          <Text variant="caption" weight="medium" tone="secondary" style={styles.noticeText}>
-            No tile source configured — set EXPO_PUBLIC_MAP_TILE_URL in .env
-          </Text>
-        </View>
-      ) : null}
 
       {isError ? (
         <View style={styles.overlayCard}>

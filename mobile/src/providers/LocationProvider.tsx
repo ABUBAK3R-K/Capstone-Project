@@ -13,6 +13,7 @@ interface LocationContextValue {
   /** True when we fell back to the city centre instead of a real fix. */
   isFallback: boolean;
   retry: () => void;
+  override: (lat: number, lng: number) => void;
 }
 
 const LocationContext = createContext<LocationContextValue | null>(null);
@@ -60,6 +61,10 @@ export function LocationProvider({ children }: { children: React.ReactNode }) {
       isResolving: status === 'resolving',
       isFallback: status === 'fallback',
       retry: () => void resolve(),
+      override: (lat: number, lng: number) => {
+        setCoords({ lat, lng });
+        setStatus('granted');
+      },
     }),
     [coords, resolve, status],
   );
