@@ -77,7 +77,11 @@ class ContentProximityStrategy(RecommendationStrategy):
         geo_sim_matrix = np.exp(-dist_km / self.geo_decay_km)
 
         # 6. Blend Similarities
-        blended_sim_matrix = (self.text_weight * text_sim_matrix) + (self.geo_weight * geo_sim_matrix)
+        # float32 halves the cache's memory (it is N x N, held for the life of
+        # the process); similarity scores don't need float64 precision.
+        blended_sim_matrix = (
+            (self.text_weight * text_sim_matrix) + (self.geo_weight * geo_sim_matrix)
+        ).astype(np.float32)
 
         # To prevent recommending the exact same place, set self-similarity to -1
         np.fill_diagonal(blended_sim_matrix, -1.0)

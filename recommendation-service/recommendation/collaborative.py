@@ -119,9 +119,18 @@ class CollaborativeFilteringStrategy(RecommendationStrategy):
                 regularization=self.regularization,
                 random_state=42,
             )
-            # implicit expects item-user matrix (items × users)
-            model.fit(user_item.T.tocsr())
-            item_factors = model.item_factors  # shape: (n_places, factors)
+            # implicit >= 0.5 (requirements pin >= 0.7) takes the USER-item
+            # matrix. The pre-0.5 API took item-user, and passing the
+            # transpose here made `item_factors` hold one row per *user* —
+            # the hybrid then crashed with IndexError when places outnumbered
+            # users, or silently blended user similarities otherwise.
+            model.fit(user_item.tocsr())
+            item_factors = np.asarray(model.item_factors)  # shape: (n_places, factors)
+            if item_factors.shape[0] != n_places:
+                raise RuntimeError(
+                    f"ALS returned {item_factors.shape[0]} item factors for {n_places} places — "
+                    "implicit API mismatch"
+                )
         except ImportError:
             logger.error(
                 "CollaborativeFiltering: 'implicit' library not installed. "
@@ -134,7 +143,7 @@ class CollaborativeFilteringStrategy(RecommendationStrategy):
             item_factors = svd.fit_transform(user_item.T)
 
         # Step 5: Item-item cosine similarity
-        sim_matrix = cosine_similarity(item_factors, item_factors)
+        sim_matrix = cosine_similarity(item_factors, item_factors).astype(np.float32)
         np.fill_diagonal(sim_matrix, -1.0)
 
         logger.info(
@@ -210,36 +219,32 @@ class HybridStrategy(RecommendationStrategy):
         final_matrix = content_matrix.copy()
         self.scoring_paths = {}
 
+        # Content-matrix columns that also exist in the collaborative matrix,
+        # and where each one lives there. Only these (i, j) pairs get blended;
+        # every other pair keeps its pure content score.
+        shared_cols = np.array([j for j, pid in enumerate(content_ids) if pid in collab_id_idx], dtype=int)
+        shared_collab_cols = np.array([collab_id_idx[content_ids[j]] for j in shared_cols], dtype=int)
+
         for i, pid_i in enumerate(content_ids):
             has_collab_i = (
                 pid_i in collab_id_idx
                 and interaction_counts.get(pid_i, 0) >= COLD_START_THRESHOLD
             )
 
-            if has_collab_i:
-                self.scoring_paths[pid_i] = "blended"
-                ci = collab_id_idx[pid_i]
-
-                for j, pid_j in enumerate(content_ids):
-                    if i == j:
-                        continue  # diagonal stays -1
-
-                    if pid_j in collab_id_idx:
-                        cj = collab_id_idx[pid_j]
-                        collab_score = collab_matrix[ci][cj]
-                        if collab_score < 0:
-                            collab_score = 0.0  # handle diagonal leak
-                        content_score = content_matrix[i][j]
-                        if content_score < 0:
-                            content_score = 0.0
-                        final_matrix[i][j] = (
-                            self.blend * content_score
-                            + (1 - self.blend) * collab_score
-                        )
-                    # else: keep pure content score for this pair
-            else:
+            if not has_collab_i:
                 self.scoring_paths[pid_i] = "content_only"
-                # Row stays as content_matrix[i] — no change needed
+                continue  # row stays as content_matrix[i]
+
+            self.scoring_paths[pid_i] = "blended"
+            ci = collab_id_idx[pid_i]
+
+            # Vectorized over the row (was a per-cell Python loop). Negative
+            # scores are clamped to zero so the -1 diagonals of either matrix
+            # can't leak into an off-diagonal blend.
+            content_scores = np.clip(content_matrix[i, shared_cols], 0.0, None)
+            collab_scores = np.clip(collab_matrix[ci, shared_collab_cols], 0.0, None)
+            final_matrix[i, shared_cols] = self.blend * content_scores + (1 - self.blend) * collab_scores
+            final_matrix[i, i] = -1.0  # a place never recommends itself
 
         blended_count = sum(
             1 for v in self.scoring_paths.values() if v == "blended"

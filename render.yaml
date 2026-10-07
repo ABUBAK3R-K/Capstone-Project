@@ -1,0 +1,23 @@
+# Render Blueprint for the recommendation service (free tier).
+# Dashboard → New → Blueprint → pick this repo. Render prompts for every
+# `sync: false` value; nothing secret is stored in this file.
+# Step-by-step: docs/DEPLOYMENT.md.
+services:
+  - type: web
+    name: cityguide-recommendations
+    runtime: docker
+    rootDir: recommendation-service
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false # Supabase SESSION pooler URL, password percent-encoded
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_ANON_KEY
+        sync: false
+      - key: ADMIN_API_KEY
+        generateValue: true # copy it into admin-dashboard's ADMIN_API_KEY
+      - key: REFRESH_INTERVAL_MINUTES
+        value: "30"

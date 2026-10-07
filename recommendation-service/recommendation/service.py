@@ -1,6 +1,32 @@
+import threading
+from dataclasses import dataclass, field
+
 import numpy as np
 from sqlalchemy.orm import Session
 from .strategy import RecommendationStrategy
+
+
+@dataclass(frozen=True)
+class SimilarityCache:
+    """One immutable build of the similarity matrix.
+
+    Everything a lookup needs lives in a single object that is swapped in with
+    one attribute assignment, so a request running while a refresh completes
+    sees either the old build or the new one — never the new index map paired
+    with the old matrix (which returned the wrong row, or raised IndexError
+    when the catalogue had grown).
+    """
+
+    place_ids: list = field(default_factory=list)
+    similarity_matrix: np.ndarray = field(default_factory=lambda: np.array([]))
+    place_index_map: dict = field(default_factory=dict)
+    scoring_paths: dict = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class SimilarPlacesResult:
+    recommendations: list
+    scoring_path: str
 
 
 class RecommendationService:
@@ -9,14 +35,15 @@ class RecommendationService:
         Initializes the service with a specific recommendation strategy.
         """
         self.strategy = strategy
-        
-        # In-memory cache
-        self.place_ids = []
-        self.similarity_matrix = np.array([])
-        self.place_index_map = {}
+        self._cache = SimilarityCache()
+        # Builds are serialized: HybridStrategy mutates its scoring_paths while
+        # building, so two overlapping refreshes (startup, /refresh, the
+        # periodic task) could otherwise interleave. Reads never take the lock.
+        self._build_lock = threading.Lock()
 
-        # Scoring path tracking (populated per-request)
-        self.last_scoring_path = "unknown"
+    @property
+    def cached_place_ids(self) -> list:
+        return list(self._cache.place_ids)
 
     def refresh_cache(self, db: Session, cutoff_time=None):
         """
@@ -28,53 +55,53 @@ class RecommendationService:
         before that timestamp. Production callers (startup, /refresh) omit it
         to use the full dataset; evaluate.py sets it to the training cutoff.
         """
-        place_ids, sim_matrix = self.strategy.build_matrix(db, cutoff_time)
-        
-        self.place_ids = place_ids
-        self.similarity_matrix = sim_matrix
-        self.place_index_map = {pid: idx for idx, pid in enumerate(self.place_ids)}
-        
-        return len(self.place_ids)
+        with self._build_lock:
+            place_ids, sim_matrix = self.strategy.build_matrix(db, cutoff_time)
+            # HybridStrategy records blended/content_only per place during the
+            # build; snapshot it alongside the matrix it describes.
+            scoring_paths = dict(getattr(self.strategy, "scoring_paths", {}) or {})
 
-    def get_similar_places(self, place_id: str, limit: int = 10):
+        self._cache = SimilarityCache(
+            place_ids=list(place_ids),
+            similarity_matrix=sim_matrix,
+            place_index_map={pid: idx for idx, pid in enumerate(place_ids)},
+            scoring_paths=scoring_paths,
+        )
+        return len(place_ids)
+
+    def get_similar_places(self, place_id: str, limit: int = 10) -> SimilarPlacesResult:
         """
-        Retrieves the top-N similar places for a given place_id using the cached matrix.
-        Also records which scoring path (blended vs content_only) served this request.
+        Retrieves the top-N similar places for a given place_id using the cached
+        matrix, plus which scoring path (blended vs content_only) served it.
+        The path is returned per call rather than stored on the service, so
+        concurrent requests can't overwrite each other's answer.
         """
-        if place_id not in self.place_index_map:
-            self.last_scoring_path = "unknown"
-            return []
+        cache = self._cache  # one read: every lookup below uses the same build
 
-        # Determine scoring path from the strategy if it's a HybridStrategy
-        if hasattr(self.strategy, 'scoring_paths'):
-            self.last_scoring_path = self.strategy.scoring_paths.get(
-                place_id, "content_only"
-            )
-        else:
-            self.last_scoring_path = "content_only"
+        if place_id not in cache.place_index_map:
+            return SimilarPlacesResult(recommendations=[], scoring_path="unknown")
 
-        idx = self.place_index_map[place_id]
-        
+        scoring_path = cache.scoring_paths.get(place_id, "content_only")
+        idx = cache.place_index_map[place_id]
+
         # O(1) lookup for this place's similarity row
-        similarities = self.similarity_matrix[idx]
-        
+        similarities = cache.similarity_matrix[idx]
+
         # Find indices of the top-N scores
-        num_places = len(similarities)
-        fetch_count = min(limit, num_places)
-        
-        top_indices = np.argsort(similarities)[-fetch_count:][::-1]
-        
+        fetch_count = min(limit, len(similarities))
+        top_indices = np.argsort(similarities)[-fetch_count:][::-1] if fetch_count > 0 else []
+
         results = []
         for i in top_indices:
             score = float(similarities[i])
             # Skip the item itself if its score is marked as -1.0
             if score < 0:
                 continue
-                
+
             results.append({
-                "place_id": self.place_ids[i],
+                "place_id": cache.place_ids[i],
                 "similarity_score": round(score, 4),
-                "scoring_path": self.last_scoring_path,
+                "scoring_path": scoring_path,
             })
-            
-        return results
+
+        return SimilarPlacesResult(recommendations=results, scoring_path=scoring_path)
