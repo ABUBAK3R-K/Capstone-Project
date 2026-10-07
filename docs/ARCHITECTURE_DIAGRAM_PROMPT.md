@@ -25,11 +25,11 @@ Modern technical documentation style, muted professional palette of teal, indigo
 amber and slate grey, clean sans-serif labels, generous white space, no photorealism,
 no 3D, no clutter.
 
-LAYER 1 - TOP - "PRESENTATION LAYER (Flutter Android App)" - a wide teal-tinted band
-containing five small rounded boxes in a row, each with a simple line icon:
-"Auth Screen" (lock icon), "Map Screen - OpenStreetMap" (map pin icon),
-"Place Detail + Similar Places" (list icon), "Report Screen - Camera + GPS"
-(camera icon), "Profile" (user icon).
+LAYER 1 - TOP - "PRESENTATION LAYER (React Native / Expo App)" - a wide teal-tinted band
+containing six small rounded boxes in a row, each with a simple line icon:
+"Auth - Customer / Business" (lock icon), "Map + Search - OpenStreetMap" (map pin icon),
+"Place Detail + Similar Places + Save" (list icon), "Report Screen - Camera + GPS"
+(camera icon), "Bookings + Orders" (calendar icon), "Business Owner Dashboard" (shop icon).
 
 LAYER 2 - UPPER MIDDLE - two separate boxes side by side, connected downward:
 On the LEFT, an indigo-tinted box labelled "RECOMMENDATION MICROSERVICE (Python
@@ -39,26 +39,33 @@ FastAPI)" containing three stacked inner boxes:
   - "Hybrid Strategy - Blend + Cold-Start Fallback"
 and beneath them a small amber box labelled "In-Memory Similarity Matrix Cache".
 On the RIGHT, an amber-tinted box labelled "ADMIN DASHBOARD (Streamlit)" containing
-two inner boxes: "Report Triage + Status Update" and "Folium Map + Analytics".
+three inner boxes: "Report Triage + Status Update", "Folium Map + Analytics" and
+"Business Verification".
 
 LAYER 3 - LOWER MIDDLE - a wide slate-grey band labelled "BACKEND SERVICES (Supabase)"
-containing four boxes in a row: "Supabase Auth (JWT)", "Row Level Security Policies",
-"Supabase Storage - reports bucket", "RPC Functions - nearby_places, search_places".
+containing four boxes in a row: "Supabase Auth (JWT)", "Row Level Security + Column Grants",
+"Supabase Storage - reports + verification buckets", "RPC Functions - nearby_places, search_places".
 
 LAYER 4 - BOTTOM - a dark navy band labelled "DATA LAYER - PostgreSQL + PostGIS"
-containing four cylinder database-table shapes labelled: "profiles", "places
-(geography Point 4326)", "interactions", "problem_reports". Below this band, a small
+containing seven cylinder database-table shapes labelled: "profiles", "places
+(geography Point 4326)", "interactions", "problem_reports", "businesses",
+"business_services", "bookings". Below this band, a small
 detached box on the left labelled "OSM Overpass API - Place Seeding" with a dashed
 arrow pointing up into the "places" table.
 
 ARROWS AND LABELS:
-- From "Place Detail" down to the Recommendation Microservice, two labelled arrows:
-  "POST /interactions" and "GET /recommendations".
-- From "Map Screen" down past the microservice, straight to the Backend Services layer,
-  labelled "Supabase RPC - nearby_places".
+- From "Place Detail" down to the Recommendation Microservice, labelled "GET /recommendations".
+- From "Place Detail" down past the microservice to Row Level Security, labelled
+  "view / save / visit interactions".
+- From "Map + Search" down past the microservice, straight to the Backend Services layer,
+  labelled "Supabase RPC - nearby_places, search_places".
+- From "Bookings + Orders" and "Business Owner Dashboard" down to Row Level Security,
+  labelled "bookings (RLS + triggers)".
 - From "Report Screen" down to Supabase Storage, labelled "Photo Upload + GPS Insert".
 - From the Recommendation Microservice down to the Data Layer, labelled "SQLAlchemy".
 - From the Admin Dashboard down to the Data Layer, labelled "psycopg2 - Read + Update Status".
+- From the Admin Dashboard across to the Recommendation Microservice, a thin dashed arrow
+  labelled "refresh on approval".
 - A small legend box in the bottom-right corner with three coloured dots labelled
   "REST/HTTP", "SQL", "Auth".
 
@@ -73,13 +80,15 @@ Everything must be legible, evenly aligned, symmetrical, and centred.
 Flat vector software architecture diagram, white background, 16:9, four stacked
 horizontal layers with rounded boxes and labelled arrows, teal/indigo/amber/slate
 palette, clean sans-serif text, technical documentation style.
-Layer 1 "Flutter Mobile App": Auth, Map (OpenStreetMap), Place Detail, Report (Camera+GPS).
+Layer 1 "React Native / Expo App": Auth, Map + Search (OpenStreetMap), Place Detail, Report
+(Camera+GPS), Bookings, Business Dashboard.
 Layer 2: left box "FastAPI Recommendation Service" containing "TF-IDF + Haversine",
 "Collaborative ALS", "Hybrid + Cold-Start Fallback", "Similarity Cache"; right box
-"Streamlit Admin Dashboard" containing "Report Triage" and "Folium Map".
+"Streamlit Admin Dashboard" containing "Report Triage", "Folium Map", "Business Verification".
 Layer 3 "Supabase": Auth (JWT), Row Level Security, Storage, RPC Functions.
-Layer 4 "PostgreSQL + PostGIS": tables profiles, places, interactions, problem_reports.
-Arrows labelled "POST /interactions", "GET /recommendations", "Supabase RPC",
+Layer 4 "PostgreSQL + PostGIS": tables profiles, places, interactions, problem_reports,
+businesses, business_services, bookings.
+Arrows labelled "GET /recommendations", "interactions (RLS)", "Supabase RPC", "bookings",
 "Photo Upload", "SQLAlchemy", "psycopg2". Minimal, symmetrical, no 3D, no photorealism.
 ```
 
@@ -89,13 +98,14 @@ Arrows labelled "POST /interactions", "GET /recommendations", "Supabase RPC",
 
 ```mermaid
 flowchart TB
-  subgraph L1["PRESENTATION LAYER — Flutter Android App"]
+  subgraph L1["PRESENTATION LAYER — React Native / Expo App"]
     direction LR
-    A1["Auth Screen"]
-    A2["Map Screen<br/>OpenStreetMap · flutter_map"]
-    A3["Place Detail<br/>+ Similar Places"]
+    A1["Auth<br/>customer · business"]
+    A2["Map + Search<br/>OpenStreetMap · react-native-maps"]
+    A3["Place Detail<br/>Similar Places · Save · Visited"]
     A4["Report Screen<br/>Camera + GPS"]
-    A5["Profile"]
+    A5["Bookings + Orders"]
+    A6["Business Owner<br/>listing · services · bookings"]
   end
 
   subgraph L2["APPLICATION LAYER"]
@@ -114,14 +124,15 @@ flowchart TB
       direction TB
       D1["Report Triage<br/>reported → in_progress → fixed"]
       D2["Folium Map + Metrics"]
+      D3["Business Verification"]
     end
   end
 
   subgraph L3["BACKEND SERVICES — Supabase"]
     direction LR
     S1["Supabase Auth<br/>JWT"]
-    S2["Row Level Security<br/>user / authority / admin"]
-    S3["Storage<br/>reports bucket"]
+    S2["Row Level Security + Column Grants<br/>user / authority / admin"]
+    S3["Storage<br/>reports · business-verification"]
     S4["RPC Functions<br/>nearby_places · search_places"]
   end
 
@@ -131,12 +142,15 @@ flowchart TB
     T2[("places<br/>geography Point 4326")]
     T3[("interactions")]
     T4[("problem_reports")]
+    T5[("businesses")]
+    T6[("business_services")]
+    T7[("bookings")]
   end
 
   OSM["OSM Overpass API<br/>place seeding"] -.->|"seed_places.py"| T2
 
-  A3 -->|"POST /interactions"| RS
   A3 -->|"GET /recommendations"| RS
+  A3 -->|"view / save / visit"| S2
   A2 -->|"Supabase RPC"| S4
   A1 -->|"sign in / sign up"| S1
   A4 -->|"photo upload"| S3
@@ -144,6 +158,11 @@ flowchart TB
   RS -->|"SQLAlchemy"| L4
   AD -->|"psycopg2 read / update"| L4
   AD -->|"role check"| S1
+  AD -.->|"refresh on approval"| RS
+  A5 -->|"book / order / cancel"| S2
+  A6 -->|"accept / decline"| S2
+  S2 --> T7
+  T5 -.->|"approved → mirrored"| T2
   S4 --> T2
   S2 --> T4
   S1 --> T1

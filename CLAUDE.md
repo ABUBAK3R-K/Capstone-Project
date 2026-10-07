@@ -4,25 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-CityGuide — a community-curated city guide app: map of local places, a "similar places" recommendation
-engine, and a photo+GPS civic problem-reporting flow that authorities triage. Four-part monorepo, one
-directory per workstream:
+CityGuide — a community-curated city guide app: map + search of local places, a "similar places"
+recommendation engine, community-added places, a photo+GPS civic problem-reporting flow that authorities
+triage, and local-business listings with verification and bookings. Four-part monorepo, one directory per
+workstream:
 
 | Directory | Stack | Role |
 |---|---|---|
-| `/mobile` | React Native + Expo (managed), TypeScript | User-facing app |
+| `/mobile` | React Native + Expo (managed), TypeScript | User-facing app (customer + business-owner surfaces) |
 | `/recommendation-service` | Python 3.10+, FastAPI | "Similar places" microservice |
-| `/admin-dashboard` | Python, Streamlit | Authority triage UI |
+| `/admin-dashboard` | Python, Streamlit | Authority triage + business verification UI |
 | `/supabase` | PostgreSQL + PostGIS, SQL migrations | Single source of truth for all three above |
 
 **The mobile client was rebuilt from Flutter to React Native; the backend (Supabase schema/RPCs and the
-FastAPI service) did not change.** Root `README.md`, `admin-dashboard/README.md`, `supabase/README.md`,
-and `docs/PROPOSED_METHODOLOGY.md` still describe the old Flutter stack and an older migration count —
-treat `mobile/README.md`, `mobile/replacing_flutter.md`, and the actual SQL/Python source as current
-truth over those docs. Flutter build artifacts (`mobile/android/`, `mobile/ios/Flutter/`, `mobile/macos/`,
-`mobile/windows/`, `mobile/.dart_tool/`, `.flutter-plugins-dependencies`) are dead leftovers from the old
-client — do not resurrect or reference them. Note `mobile/macos/` and `mobile/windows/` are **not** in
-`.gitignore`, unlike `android/`/`ios/`; don't `git add -A` inside `mobile/` without checking status first.
+FastAPI service) did not change in that rebuild.** All docs now describe the React Native stack; the only
+intentional Flutter mentions are history notes and `mobile/replacing_flutter.md`. The old Flutter build
+leftovers were deleted and are git-ignored — `mobile/android/` and `mobile/ios/` would now only appear
+from `expo prebuild`, which this project doesn't use.
+
+Business accounts/bookings (migrations `008`+) are part of the capstone scope, not an add-on.
 
 ## Commands
 
@@ -31,6 +31,7 @@ client — do not resurrect or reference them. Note `mobile/macos/` and `mobile/
 npm install
 cp .env.example .env        # fill in EXPO_PUBLIC_* values, see below
 npx expo start               # press a / i, or scan QR with Expo Go — no expo prebuild needed
+npm test                     # Jest unit tests for src/lib (jest-expo preset)
 npm run typecheck            # tsc --noEmit
 npx expo export --platform android   # verify the bundle actually builds
 ```
@@ -40,23 +41,27 @@ After editing `.env`, restart with `npx expo start --clear` — values are inlin
 ```bash
 python -m venv .venv && .venv\Scripts\activate     # Windows; source .venv/bin/activate on macOS/Linux
 pip install -r requirements.txt
-cp .env.example .env         # set DATABASE_URL to a Supabase pooler connection string
+cp .env.example .env         # DATABASE_URL (pooler), SUPABASE_URL/ANON_KEY, ADMIN_API_KEY — see comments in it
 uvicorn main:app --reload --port 8000     # Swagger at /docs
+pip install -r requirements-dev.txt && python -m pytest   # no DB needed
 ```
-Evaluate the model offline: `python evaluate.py` (temporal 80/20 split, precision/recall@5/10, catalog coverage — see gotcha below).
+Evaluate offline: `python evaluate.py --compare` (temporal 80/20 split; content vs collaborative vs hybrid).
+Pre-launch there's no history, so first `python scripts/generate_synthetic_interactions.py` (undo with
+`--purge`). Results and caveats: `docs/EVALUATION.md`.
 
 ### Admin dashboard (`/admin-dashboard`)
 ```bash
 python -m venv .venv && .venv\Scripts\activate
 pip install -r requirements.txt
-cp .env.example .env         # SUPABASE_URL, SUPABASE_KEY, DATABASE_URL, SKIP_AUTH
+cp .env.example .env         # DATABASE_URL, SUPABASE_URL, SUPABASE_ANON_KEY (+ optional, see comments)
 streamlit run app.py         # http://localhost:8501
+python -m pytest tests       # unit tests for lib/
 ```
 
 ### Supabase (`/supabase`)
-Apply `migrations/001_initial_schema.sql` through `009_business_hardening.sql` **in order** against
-a Supabase Cloud project's SQL editor, or locally via `supabase start && supabase db reset`. There is no
-single "run migrations" command in this repo — apply the numbered files sequentially.
+Apply `migrations/001_initial_schema.sql` through `011_booking_cancellation.sql` **in order** in a
+Supabase Cloud project's SQL editor. There is no single "run migrations" command in this repo, and no
+`supabase/config.toml` for the local CLI — apply the numbered files sequentially.
 
 Seed real place data (optional, requires the Overpass API and a service-role key):
 ```bash
@@ -66,10 +71,11 @@ cp .env.example .env
 python seed_places.py
 ```
 
-There is no test runner across the repo. `supabase/test_rls.sql` is a self-checking SQL script (run the
-whole file as `postgres` via `psql` or the Supabase SQL editor, after all migrations) covering RLS and
-column grants on `problem_reports`, `profiles`, `interactions`, `businesses`, `bookings` and `places`. It
-raises `FAIL: …` on the first broken check, ends with `ALL RLS CHECKS PASSED`, and rolls everything back.
+`supabase/test_rls.sql` is a self-checking SQL suite (run the whole file as `postgres` via `psql` or the
+Supabase SQL editor, after all migrations) covering RLS, column grants and booking triggers on
+`problem_reports`, `profiles`, `interactions`, `businesses`, `bookings` and `places`. It raises `FAIL: …`
+on the first broken check, ends with `ALL RLS CHECKS PASSED`, and rolls everything back. Any new
+migration touching RLS or grants should add checks here.
 
 ## Architecture
 
@@ -104,8 +110,8 @@ RLS is the actual authorization boundary — not client-side checks. Key policie
   `status`/`responded_at` on insert; owners can only update `status`, along `pending → confirmed|declined`,
   `confirmed → completed` (enforced by trigger, which also validates service/business on insert).
 - `problem_reports`: insert requires `user_id = auth.uid()` and `status = 'reported'`; a regular user can only *read their own*
-  reports (this is why the mobile Home screen is titled "Your reports nearby," not a city-wide feed —
-  city-wide visibility would need a new `SECURITY DEFINER` RPC, deliberately not added); `authority`/`admin`
+  reports (so the app shows only the user's own report counts, on Profile — a city-wide feed would need
+  a new `SECURITY DEFINER` RPC and is explicitly out of scope); `authority`/`admin`
   roles can read all reports and are the only roles that can update status.
 - `profiles.role` is **not** client-writable (column-level `REVOKE`, migration `007`) — this closes a real
   self-promotion privilege-escalation path where a user could otherwise `UPDATE profiles SET role='admin'`.
@@ -154,11 +160,14 @@ by it (`recommendation/collaborative.py`). Production callers (`main.py`'s start
 ```
 src/
 ├── design/          # visual identity: tokens.ts (palette/spacing/type), typography.tsx, primitives
-├── features/         # one folder per screen area: auth, home, map, place, report, profile
-├── lib/              # supabase client, env loading, RPC wrappers, recommendations fetch, geo decode
-├── navigation/        # root stack + bottom tabs (Home, Map, Report, Profile)
-└── providers/         # AuthProvider (Supabase session), LocationProvider
+├── features/         # one folder per screen area: auth, home, map, search, place, report, booking, business, profile
+├── lib/              # supabase client, env, RPC/table wrappers, interactions, recommendations fetch, geo decode
+│   └── __tests__/    # Jest tests; supabaseMock.ts records every query-builder call
+├── navigation/        # root stack + customer tabs (Home, Map, Report, Profile) + business-owner tabs
+└── providers/         # AuthProvider (session + profile/account_type), LocationProvider
 ```
+Interactions (view / favorite / visit) are written straight to Supabase from `lib/interactions.ts` under
+RLS, not through the FastAPI service — so implicit feedback is still captured when the service is down.
 `design/` is intentionally separate from `features/` — every screen composes the same primitives so
 spacing/color stay consistent by construction. No feature file should contain a raw hex value or pixel
 margin; add missing tokens to `design/tokens.ts` instead.
@@ -178,4 +187,4 @@ OSM-style raster source (Mapbox/MapTiler free tier). `react-native-maps` was cho
 
 Reaching the FastAPI service from a device during development: `http://10.0.2.2:8000` (Android emulator),
 `http://127.0.0.1:8000` (iOS simulator), or your machine's LAN IP (physical device) — none of these work
-unmodified for a demo off a single dev machine or a deployed environment.
+unmodified for a demo off a single dev machine or a deployed environment — see `docs/DEPLOYMENT.md`.

@@ -22,3 +22,17 @@ expo-env.d.ts
 npm-debug.*
 yarn-error.*
 .DS_Store
+
+# Leftovers from the old Flutter client — never part of the Expo app.
+/build/
+/windows/
+/macos/
+/linux/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.idea/
+*.iml
+
+# Test coverage output
+/coverage/

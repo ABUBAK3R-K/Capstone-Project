@@ -91,34 +91,32 @@ GET /recommendations?place_id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa&limit=5
 }
 ```
 
-### Flutter Usage (for M2)
-```dart
-import 'package:http/http.dart' as http;
-import 'dart:convert';
+`scoring_path` is `blended` or `content_only` (see the README). `404` means the place isn't in the
+current similarity cache — e.g. it was added after the last rebuild; the mobile app treats that as
+"no similar places yet".
 
-Future<List<Place>> getSimilarPlaces(String placeId) async {
-  final response = await http.get(
-    Uri.parse('http://<HOST>:8000/recommendations?place_id=$placeId&limit=5'),
-  );
-  final data = jsonDecode(response.body);
-  final recs = data['recommendations'] as List;
-  return recs.map((json) => Place.fromJson(json)).toList();
-}
+### Mobile usage
+`fetchSimilarPlaces` in `mobile/src/lib/recommendations.ts`:
+```ts
+const response = await fetch(`${env.recommendationsUrl}/recommendations?place_id=${encodeURIComponent(placeId)}&limit=8`);
+const { recommendations } = await response.json();
 ```
-Wire this into the "Similar Places" section of `PlaceDetailScreen`.
+Rendered by the "Similar places" row on the place detail screen.
 
 ---
 
 ## `GET /interactions/stats`
 
-Returns interaction volume metrics. Use this to monitor when enough data has accumulated to begin Phase 2 collaborative filtering.
+Returns interaction volume metrics. `collab_ready_places` counts places with ≥ 5 interactions — the
+ones the hybrid now serves on its `blended` path.
 
 ### Response `200 OK`
 ```json
 {
   "total_interactions": 142,
   "unique_users": 12,
-  "unique_places": 35
+  "unique_places": 35,
+  "collab_ready_places": 9
 }
 ```
 
@@ -148,13 +146,18 @@ curl -X POST http://localhost:8000/recommendations/refresh -H "X-Admin-Key: $ADM
 
 ## `GET /health`
 
-Simple health check.
+Pings the database (`SELECT 1`) rather than just checking that `DATABASE_URL` is set.
 
-### Response `200 OK`
+### Response `200 OK` (database reachable) / `503` (not)
 ```json
 {
   "status": "healthy",
   "database_configured": true,
-  "service": "recommendation-service"
+  "database_connected": true,
+  "service": "recommendation-service",
+  "version": "0.3.0",
+  "strategy": "hybrid (content + collaborative)"
 }
 ```
+On `503`, `status` is `"degraded"` and `database_connected` is `false` — usually a wrong or
+un-encoded `DATABASE_URL` (see `.env.example`).

@@ -1,8 +1,9 @@
 # CityGuide Mobile (React Native / Expo)
 
-The mobile client for CityGuide: browse local places on an OSM-based map, see
-what the recommendation model considers similar, and report civic issues with a
-photo and a GPS tag.
+The mobile client for CityGuide: browse and search local places on an OSM-based
+map, see what the recommendation model considers similar, add missing places,
+report civic issues with a photo and a GPS tag, and book local businesses. A
+second tab set serves business owners (listing, services, incoming bookings).
 
 Rebuilt in React Native + Expo, replacing the previous Flutter implementation.
 The backend is unchanged — same Supabase project, same RPCs, same FastAPI
@@ -38,7 +39,8 @@ into the bundle.
 | `EXPO_PUBLIC_RECOMMENDATIONS_URL` | no | FastAPI service. Blank disables "Similar places" cleanly |
 | `EXPO_PUBLIC_MAP_TILE_URL` | no | Hosted OSM-style raster tiles. Blank renders markers with no basemap |
 | `EXPO_PUBLIC_MAP_ATTRIBUTION` | no | Attribution string shown on the map |
-| `EXPO_PUBLIC_DEV_SKIP_AUTH` | no | Skip login. Reporting stays disabled — inserts need a real `auth.uid()` |
+| `EXPO_PUBLIC_MAP_TILE_SIZE` | no | Tile edge in px: 512 for Mapbox @2x, 256 for most others |
+| `EXPO_PUBLIC_DEV_SKIP_AUTH` | no | Skip login. Reporting, adding places, saving and booking stay disabled — they need a real `auth.uid()` |
 
 Reaching the FastAPI service from a device:
 
@@ -81,26 +83,28 @@ the Google basemap does not render underneath and fight with the raster tiles.
 
 ## Backend contract
 
-Nothing in this app modifies the schema. It talks to:
+The full table of what the app reads and writes, and what the database enforces
+for each, is in [`../supabase/API.md`](../supabase/API.md). In short:
 
-- **`nearby_places(lat, lng, radius_meters, filter_category)`** — distance-ordered
-  places with `location` already unpacked to `lat`/`lng`.
-- **`search_places(search_query, lat, lng)`** — note the parameter is
-  `search_query`, not `query`.
-- **`problem_reports`** — direct table access. Its `location` is a raw
-  `geography` column, so PostgREST returns hex EWKB; it is decoded client-side in
-  `lib/geo.ts` (`parsePostgisPoint`) rather than adding a migration.
-- **`storage/reports`** — public bucket for report photos, authenticated upload.
-- **`GET /recommendations`** and **`POST /interactions`** on the FastAPI service.
+- **`nearby_places`** / **`search_places`** RPCs — flat, distance-ordered rows.
+  `search_places` takes `search_query` (not `query`) and returns ≤ 50 matches.
+- **Direct table access, all RLS-gated:** `places` (Add a place), `interactions`
+  (view / save / visit — logged straight to Supabase, so feedback is kept even
+  when the recommendation service is down), `problem_reports`, `profiles`,
+  `businesses`, `business_services`, `bookings`.
+- Geography columns read from tables come back as hex EWKB and are decoded in
+  `lib/geo.ts` (`parsePostgisPoint`); inserts send GeoJSON.
+- **Storage:** `reports` (public photos) and `business-verification` (private).
+- **`GET /recommendations`** on the FastAPI service. A 404 (place not in the
+  cache yet — e.g. just added) is treated as "no similar places yet".
 
 ### A note on "your reports"
 
 RLS on `problem_reports` only exposes rows where `user_id = auth.uid()`, unless
 the user's profile role is `authority` or `admin`. An ordinary user therefore
-cannot see a city-wide issue feed, and the Home section is titled **"Your reports
-nearby"** to say so rather than implying otherwise. Making it city-wide needs a
-new `SECURITY DEFINER` RPC returning anonymised nearby reports — a backend
-change, deliberately not made here.
+only ever sees their own reports — as status counts on the Profile screen. A
+city-wide issue feed would need a new `SECURITY DEFINER` RPC returning anonymised
+reports, and is explicitly out of scope (`PROJECT_SCOPE.md`).
 
 ---
 
@@ -108,17 +112,24 @@ change, deliberately not made here.
 
 ```
 src/
-├── App.tsx                  # providers: Query → Auth → Navigation
-├── providers/               # AuthProvider (Supabase session)
-├── navigation/              # Root stack + bottom tabs
+├── App.tsx                  # providers: Query → Auth → Location → Navigation
+├── providers/               # AuthProvider (session + profile/account type), LocationProvider
+├── navigation/              # Root stack, customer tabs, business-owner tabs
 ├── design/                  # ← visual identity lives here
 │   ├── tokens.ts            #   palette, spacing, radii, type scale, shadows
 │   ├── typography.tsx       #   <Text variant="…"> primitives
 │   └── components/          #   Button · Card · Chip · Skeleton · EmptyState · …
 ├── features/
-│   ├── auth/  home/  map/  place/  report/  profile/
-├── lib/                     # supabase · env · places · reports · recommendations · geo
-├── hooks/                   # useLocation · usePlaces
+│   ├── auth/                #   welcome, customer + business sign-in
+│   ├── home/  map/  search/ #   discovery
+│   ├── place/               #   place detail, similar places, save/visit, add a place
+│   ├── report/              #   civic report flow
+│   ├── booking/             #   appointment + order checkout
+│   ├── business/            #   owner dashboard, services, bookings, profile
+│   └── profile/             #   report stats, my bookings, contribute
+├── lib/                     # supabase · env · places · interactions · reports · bookings · businesses · recommendations · geo
+│   └── __tests__/           #   Jest unit tests for lib/
+├── hooks/                   # usePlaces · useBusiness · useDebouncedValue
 ├── constants/categories.ts  # category → icon + colour, shared by markers & chips
 └── types/
 ```
@@ -130,18 +141,26 @@ if a token is missing, add it to `design/tokens.ts`.
 
 ### Visual identity — "Terracotta & Ink"
 
-Warm paper canvas (`#FBF8F4`), near-black ink (`#16181D`), terracotta primary
-(`#E0562F`) for actions and selected states, deep teal (`#0E6E62`) as the
-secondary accent. Type is Plus Jakarta Sans for headings over Inter for body on a
-7-step scale; spacing is a strict 4pt scale. A six-colour category ramp
-(`categoryPalette`) means a colour always signifies the same category, whether it
-appears on a map marker, a filter chip or a card tag.
+Warm paper canvas (`#EDE6DB`), near-black ink (`#140E0C`), terracotta primary
+(`#DA611B`) for actions and selected states, slate teal (`#4D7276`) as the
+secondary. Type pairs Fraunces (display) with Figtree (body); spacing is a strict
+4pt scale. A category colour ramp (`categoryPalette`) means a colour always
+signifies the same category, whether on a map marker, a filter chip or a card tag.
+`design/tokens.ts` is the source of truth if this paragraph ever drifts.
 
 ---
 
 ## Checks
 
 ```bash
+npm test                 # Jest unit tests (lib/)
 npm run typecheck        # tsc --noEmit
 npx expo export --platform android   # verify the bundle builds
 ```
+
+## Distributing a build
+
+Expo Go is enough for development and live demos. For an installable APK, see
+`eas.json` and [`../docs/DEPLOYMENT.md`](../docs/DEPLOYMENT.md) — remember EAS
+never sees your git-ignored `.env`, so the `EXPO_PUBLIC_*` values must be set
+with `eas env:create` first.

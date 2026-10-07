@@ -1,46 +1,73 @@
 # Recommendation Microservice (/recommendation-service)
 
-This directory contains the Python FastAPI microservice responsible for generating "similar places" recommendations. It connects directly to the Supabase PostgreSQL database to compute recommendations based on user interactions and geographic locations.
+FastAPI service behind the app's "Similar places" row. It reads the shared Supabase Postgres
+directly, builds a place-to-place similarity matrix, and serves top-N lookups from memory.
 
 ## 🧑‍💻 Owner
-* **Role:** Recommendation Engineer (User)
-* **Responsibilities:** Setting up the FastAPI microservice, establishing a connection to PostgreSQL (via SQLAlchemy or asyncpg), implementing recommendation logic (collaborative filtering, content-based, or geofenced popularity), and providing API endpoints for the Flutter mobile app.
+* **Role:** Recommendation Engineer
+* **Responsibilities:** recommendation strategies, the API, offline evaluation.
 
 ## 🛠️ Tech Stack
-* **Language:** Python 3.10+
-* **Framework:** FastAPI
-* **WebServer:** Uvicorn
-* **Database Driver:** SQLAlchemy / asyncpg / psycopg2 (connecting directly to Supabase Postgres)
+Python 3.10+, FastAPI + Uvicorn, SQLAlchemy + psycopg2, scikit-learn, SciPy, NumPy, `implicit`.
+
+## 🧠 How it recommends
+
+Strategy pattern (`recommendation/`), composed in `main.py`:
+
+| Strategy | File | Idea |
+| :-- | :-- | :-- |
+| `ContentProximityStrategy` | `strategy.py` | TF-IDF over category + type + description (weight 0.7), fused with geographic proximity `exp(-km / 2)` (weight 0.3). Works with zero history. |
+| `CollaborativeFilteringStrategy` | `collaborative.py` | Implicit-feedback ALS over interactions weighted visit 3 / favorite 2 / view 1; TruncatedSVD fallback if `implicit` isn't installed. |
+| `HybridStrategy` (served) | `collaborative.py` | Per place: blend content and collaborative 50/50 once it has ≥ 5 interactions (`blended`), else pure content (`content_only`). The path is returned with every response. |
+
+The matrix is built at startup, every `REFRESH_INTERVAL_MINUTES` in the background, and on
+`POST /recommendations/refresh`. Builds are swapped in atomically, so requests never see a
+half-updated cache.
+
+## 🔌 API
+
+Full reference: [`API.md`](API.md) (Swagger at `/docs`).
+
+| Endpoint | Auth |
+| :-- | :-- |
+| `GET /recommendations?place_id=…&limit=…` | none |
+| `POST /interactions` | `Authorization: Bearer <Supabase access token>` — the user comes from the token |
+| `GET /interactions/stats` | none |
+| `POST /recommendations/refresh` | `X-Admin-Key: <ADMIN_API_KEY>` |
+| `GET /health` | none — pings the database, 503 if unreachable |
+
+The mobile app logs interactions straight to Supabase (RLS-protected); `POST /interactions` remains
+for other clients.
 
 ## 🚀 Running Locally
 
-1. **Navigate to directory:**
-   ```bash
-   cd recommendation-service
-   ```
+```bash
+python -m venv .venv
+.venv\Scripts\activate                 # macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env                   # see the comments in it for every variable
+uvicorn main:app --reload --port 8000
+```
 
-2. **Create and activate a virtual environment:**
-   ```bash
-   python -m venv .venv
-   # Windows:
-   .venv\Scripts\activate
-   # macOS/Linux:
-   source .venv/bin/activate
-   ```
+Docker (what Render runs — see `../render.yaml` and `../docs/DEPLOYMENT.md`):
+```bash
+docker build -t cityguide-recs .
+docker run --env-file .env -p 8000:8000 cityguide-recs
+```
 
-3. **Install dependencies:**
-   ```bash
-   pip install -r requirements.txt
-   ```
+## 📏 Offline evaluation
 
-4. **Setup Environment Variables:**
-   ```bash
-   cp .env.example .env
-   # Open .env and fill in your Supabase connection credentials
-   ```
+```bash
+python scripts/generate_synthetic_interactions.py    # pre-launch: fabricate a reproducible history
+python evaluate.py --compare                          # content vs collaborative vs hybrid, temporal 80/20 split
+python scripts/generate_synthetic_interactions.py --purge
+```
 
-5. **Start the server:**
-   ```bash
-   uvicorn main:app --reload
-   ```
-   The service will be available at `http://127.0.0.1:8000` (docs available at `/docs`).
+Method, results and caveats: [`../docs/EVALUATION.md`](../docs/EVALUATION.md).
+
+## 🧪 Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest                        # no database needed; ~92% coverage of the source
+```

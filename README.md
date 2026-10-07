@@ -1,39 +1,67 @@
-# CityGuide - Community-Curated City Guide App
+# CityGuide — Community-Curated City Guide
 
-A community-curated city guide Android application that maps local businesses, shops, and public/religious places, featuring a "similar places" recommendation engine and a photo-based civic problem reporting flow that local authorities can review.
+A city guide app with three jobs:
 
-This repository is structured as a monorepo for a 4-person student capstone project.
+1. **Discovery** — find local shops, parks, temples and services on a map, search them, and get
+   "similar places" recommendations for anywhere you look. Anyone signed in can add a missing place.
+2. **Civic reporting** — photograph a pothole, garbage, a broken street light, etc.; the GPS location
+   is captured automatically, and municipal authorities triage it on a web dashboard.
+3. **Local business** — businesses register, get verified by an admin, list their services, and take
+   appointment bookings and orders from customers.
 
----
-
-## 🛠️ Tech Stack
-* **Mobile Client:** Flutter (Dart) → Android target
-* **Maps Integration:** OpenStreetMap (OSM) via the `flutter_map` package *(Zero paid maps APIs or keys used)*
-* **Backend Database:** Supabase (PostgreSQL + PostGIS + Supabase Auth + Supabase Storage)
-* **Recommendation Microservice:** Python + FastAPI (connecting directly to Supabase Postgres)
-* **Admin Dashboard:** Streamlit (Python) for authority review
-* **External APIs:** None. All tools/APIs are free-tier or open-source.
+A four-person capstone project, built entirely on free tiers and open data — no paid APIs.
 
 ---
 
-## 📂 Repository Structure & Roles
+## Tech stack
 
-This monorepo is divided into the following key folders, each assigned to a team member:
+| Piece | Directory | Stack |
+| :-- | :-- | :-- |
+| Mobile app | [`/mobile`](./mobile) | React Native + Expo (managed), TypeScript, TanStack Query, `react-native-maps` |
+| Recommendation service | [`/recommendation-service`](./recommendation-service) | Python 3.10+, FastAPI, scikit-learn (TF-IDF), `implicit` (ALS) |
+| Admin dashboard | [`/admin-dashboard`](./admin-dashboard) | Python, Streamlit, Folium |
+| Backend | [`/supabase`](./supabase) | Supabase: PostgreSQL + PostGIS, Auth, Storage, Row Level Security |
 
-| Folder | Role Owner | Description |
-| :--- | :--- | :--- |
-| [`/mobile`](./mobile) | **Mobile Developer** | Flutter mobile application containing user maps, recommendation displays, and reporting UI. |
-| [`/recommendation-service`](./recommendation-service) | **Recommendation Engineer (User)** | Python FastAPI microservice that analyzes interaction history and geographical data to recommend similar places. |
-| [`/admin-dashboard`](./admin-dashboard) | **Admin / Web Developer** | Streamlit application for local authorities to review, categorize, and resolve reported civic problems. |
-| [`/supabase`](./supabase) | **Backend / Database Developer** | Postgres migrations, SQL schemas, custom PostGIS functions, and local Supabase setup. |
-| [`/docs`](./docs) | **All Team Members (Shared)** | Product Requirements Document (PRD), API documentation, and architecture diagrams. |
+The mobile client was rebuilt from Flutter to React Native; the backend and recommendation service
+were unaffected. Place data is bootstrapped from the OpenStreetMap Overpass API.
 
----
+## How it fits together
 
-## 🚀 Getting Started
+```
+ mobile app ──(supabase-js: RPCs + RLS-gated tables)──► Supabase Postgres ◄──(psycopg2)── admin dashboard
+     │                                                        ▲
+     └──(HTTP: GET /recommendations)──► recommendation service ┘ (SQLAlchemy, builds similarity matrix)
+```
 
-Instructions for running each service are provided in their respective directories. Ensure you have the appropriate runtimes installed:
-* Flutter SDK (3.x+) for `/mobile`
-* Python 3.10+ for `/recommendation-service` and `/admin-dashboard`
-* Docker / Supabase CLI (optional, for local development) for `/supabase`
+Postgres is the single source of truth. **Row Level Security is the authorization boundary** — the
+anon key ships in the app by design, so every table is protected server-side (`supabase/migrations/`,
+verified by `supabase/test_rls.sql`).
 
+The recommender is a hybrid: content similarity (TF-IDF over category/type/description, fused with
+geographic proximity) for every place from day one, blended with collaborative filtering (implicit
+ALS over view/save/visit history) once a place has enough interactions.
+
+## Repository layout and owners
+
+| Folder | Owner | What's in it |
+| :-- | :-- | :-- |
+| [`/mobile`](./mobile) | Mobile developer | Map, search, place detail, similar places, add-a-place, reporting, bookings, business owner screens |
+| [`/recommendation-service`](./recommendation-service) | Recommendation engineer | Strategies, API, offline evaluation, synthetic data generator |
+| [`/admin-dashboard`](./admin-dashboard) | Admin / web developer | Report triage, business verification and management |
+| [`/supabase`](./supabase) | Backend / database developer | Migrations `001`–`011`, RLS test suite, OSM seed script |
+| [`/docs`](./docs) | Everyone | Methodology, evaluation results, deployment guide |
+
+## Getting started
+
+- **Run it locally:** [`HOW_TO_RUN.md`](./HOW_TO_RUN.md)
+- **Deploy it (free tier):** [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md)
+- **Scope:** [`PROJECT_SCOPE.md`](./PROJECT_SCOPE.md) · **Status + your to-do list:** [`PROJECT_STATUS.md`](./PROJECT_STATUS.md)
+
+## Tests
+
+| Piece | Command | |
+| :-- | :-- | :-- |
+| Database (RLS, grants, triggers) | run `supabase/test_rls.sql` in the SQL editor | must end `ALL RLS CHECKS PASSED` |
+| Recommendation service | `cd recommendation-service && pip install -r requirements-dev.txt && python -m pytest` | |
+| Admin dashboard | `cd admin-dashboard && python -m pytest tests` | |
+| Mobile | `cd mobile && npm test && npm run typecheck` | |

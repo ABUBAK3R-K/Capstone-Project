@@ -1,223 +1,144 @@
-# How to Run CityGuide Project
+# How to Run CityGuide Locally
 
-This guide provides step-by-step instructions for setting up and running all components of the **CityGuide** monorepo on your local machine.
+Four pieces, one shared database. Set up Supabase first; the other three only need its credentials.
+To put it online instead, see [`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md). For what's finished and the
+setup steps only the project owner can do (credentials, live database, deploy), see
+[`PROJECT_STATUS.md`](PROJECT_STATUS.md).
+
+| Component | Runtime |
+| :-- | :-- |
+| Recommendation service, admin dashboard | Python 3.10+ |
+| Mobile app | Node.js 18+, plus Expo Go on a phone or an Android/iOS emulator |
+| Database | A Supabase Cloud project (free) |
 
 ---
 
-## ⚡ Quick Start (dev mode, no login)
+## 1. Database (Supabase)
 
-Supabase Auth is not wired up yet (the `profiles` table has no rows, so no account
-can pass the authority/admin role check). Both apps therefore ship a **dev auth
-bypass** that is already switched on in the local `.env` files:
+1. Create a project at [supabase.com](https://supabase.com/).
+2. In **SQL Editor**, run every file in [`supabase/migrations/`](supabase/migrations) **in order**,
+   `001_initial_schema.sql` through `011_booking_cancellation.sql`. There is no single migrate
+   command — run them one after another.
+3. Run [`supabase/test_rls.sql`](supabase/test_rls.sql). It must end with `ALL RLS CHECKS PASSED`
+   (it rolls itself back, so it leaves no data behind).
+4. Give one account dashboard access. Sign up through the app (or **Authentication → Add user**), then:
+   ```sql
+   update profiles set role = 'authority'
+   where id = (select id from auth.users where email = 'you@example.com');
+   ```
+5. Optional — load real places from OpenStreetMap: [`supabase/seed/README.md`](supabase/seed/README.md).
+6. Collect from **Project Settings**:
+   - **API → Project URL** and **anon public key**
+   - **API → service_role key** (dashboard document previews and the seed script only — never the app)
+   - **Database → Connection string → Session pooler** → `DATABASE_URL`, with the password
+     percent-encoded (see `recommendation-service/.env.example`)
 
-| Component | Flag | File |
-| :--- | :--- | :--- |
-| Admin Dashboard | `SKIP_AUTH=true` | `admin-dashboard/.env` |
-| Mobile App | `DEV_SKIP_AUTH=true` | `mobile/.env` |
+### Already have a project with older migrations?
 
-Set either flag to `false` to get the normal login screen back.
+Don't re-run the old files. Apply only the ones you're missing, in order, then re-run the test suite.
+For a project that stopped at `008_business_accounts.sql`, that is:
 
-Three terminals:
+1. `009_business_hardening.sql`
+2. `010_places_dedupe_and_search.sql`
+3. `011_booking_cancellation.sql`
+4. `test_rls.sql` → must end `ALL RLS CHECKS PASSED`
+
+After `009`, audit approved businesses (`PROJECT_STATUS.md`, step 3), and make sure everyone runs
+the updated mobile app. Older builds send a column `009` no longer accepts when a business answers
+a booking.
+
+---
+
+## 2. Recommendation service (FastAPI)
 
 ```bash
-# 1. Recommendation API  -> http://127.0.0.1:8000/docs
-cd recommendation-service && .venv/Scripts/python -m uvicorn main:app --reload --port 8000
-
-# 2. Admin dashboard     -> http://localhost:8501
-cd admin-dashboard && .venv/Scripts/python -m streamlit run app.py
-
-# 3. Mobile app          -> press `a` for Android, `i` for iOS, or scan with Expo Go
-cd mobile && npx expo start
+cd recommendation-service
+python -m venv .venv
+.venv\Scripts\activate            # macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env              # DATABASE_URL, SUPABASE_URL, SUPABASE_ANON_KEY, ADMIN_API_KEY
+uvicorn main:app --reload --port 8000
 ```
 
-**What works without logging in:** the map, place lists, place details and
-"similar places" recommendations, and the whole admin dashboard.
-**What does not:** submitting a problem report and logging interactions — both
-need a real Supabase user, because `problem_reports` / `interactions` have a
-foreign key to `profiles` and RLS only allows authenticated inserts.
+- Swagger UI: <http://127.0.0.1:8000/docs>
+- <http://127.0.0.1:8000/health> must report `"database_connected": true`.
+- Rebuild the cache after seeding:
+  `curl -X POST http://127.0.0.1:8000/recommendations/refresh -H "X-Admin-Key: <ADMIN_API_KEY>"`
+  (it also rebuilds itself every `REFRESH_INTERVAL_MINUTES`).
+
+### Offline evaluation
+
+```bash
+python scripts/generate_synthetic_interactions.py      # only if there's no real interaction history yet
+python evaluate.py --compare                            # content vs collaborative vs hybrid
+python scripts/generate_synthetic_interactions.py --purge
+```
+
+Results and how to read them: [`docs/EVALUATION.md`](docs/EVALUATION.md).
+
+### Tests
+
+```bash
+pip install -r requirements-dev.txt
+python -m pytest            # no database needed
+```
 
 ---
 
-## 📋 System Prerequisites
+## 3. Admin dashboard (Streamlit)
 
-Before getting started, make sure you have the following installed on your system:
+```bash
+cd admin-dashboard
+python -m venv .venv
+.venv\Scripts\activate
+pip install -r requirements.txt
+cp .env.example .env              # DATABASE_URL, SUPABASE_URL, SUPABASE_ANON_KEY (+ optional keys)
+streamlit run app.py              # http://localhost:8501
+```
 
-| Component | Required Runtime / Tool | Recommended Version |
-| :--- | :--- | :--- |
-| **Recommendation Service** | Python | 3.10+ |
-| **Admin Dashboard** | Python | 3.10+ |
-| **Mobile App** | Node.js & Expo Go (or Android Studio / Xcode emulator) | Node 18+ / Expo SDK 52 |
-| **Database** | Supabase CLI (Local) or Supabase Cloud Account | Latest |
-| **Version Control** | Git | Latest |
+Sign in with the account promoted in step 1.4. Pages: **Civic Reports** (map + status workflow),
+**Verify Businesses**, **Manage Businesses**.
 
----
-
-## 🗄️ 1. Database & Backend Setup (Supabase)
-
-You can use either a **Supabase Cloud** project or the **local Supabase CLI**.
-
-### Option A: Supabase Cloud (Recommended)
-1. Log in to [Supabase](https://supabase.com/) and create a new project.
-2. Go to the **SQL Editor** in your Supabase Dashboard.
-3. Apply the schema migration located at:
-   - [`supabase/migrations/001_initial_schema.sql`](supabase/migrations/001_initial_schema.sql)
-4. (Optional) Run any seed scripts located in `supabase/seed/` if test data is required.
-5. Retrieve your project connection credentials from **Project Settings > Database** and **Project Settings > API**:
-   - `DATABASE_URL` (Direct or Session Pooler Postgres connection string)
-   - `SUPABASE_URL`
-   - `SUPABASE_KEY` / `SUPABASE_SERVICE_ROLE_KEY`
-
-### Option B: Local Supabase CLI
-1. Open a terminal in the root or `supabase` directory.
-2. Start the local Supabase containers:
-   ```bash
-   supabase start
-   ```
-3. Apply the migrations:
-   ```bash
-   supabase db reset
-   ```
+`SKIP_AUTH=true` in `.env` bypasses the login for local development only.
 
 ---
 
-## 🐍 2. Recommendation Microservice (FastAPI)
+## 4. Mobile app (React Native / Expo)
 
-The recommendation service calculates similar places and serves APIs consumed by the mobile client.
+```bash
+cd mobile
+npm install
+cp .env.example .env
+npx expo start                    # a = Android emulator, i = iOS simulator, or scan the QR with Expo Go
+```
 
-### Steps:
-1. Open a terminal and navigate to the `recommendation-service` folder:
-   ```bash
-   cd recommendation-service
-   ```
+Fill in `.env`:
+- `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY` — **required**; the app refuses to start
+  without them.
+- `EXPO_PUBLIC_RECOMMENDATIONS_URL` — `http://10.0.2.2:8000` (Android emulator),
+  `http://127.0.0.1:8000` (iOS simulator), or your machine's LAN IP (physical phone). Blank hides
+  "Similar places".
+- `EXPO_PUBLIC_MAP_TILE_URL` — a hosted OSM-style raster source (Mapbox / MapTiler free tier). **Not**
+  `tile.openstreetmap.org`: `react-native-maps` blocks it on Android. Blank shows markers without a basemap.
 
-2. Create and activate a Python virtual environment:
-   - **Windows (PowerShell):**
-     ```powershell
-     python -m venv .venv
-     .\.venv\Scripts\activate
-     ```
-   - **macOS / Linux:**
-     ```bash
-     python3 -m venv .venv
-     source .venv/bin/activate
-     ```
+After editing `.env`, restart with `npx expo start --clear` — the values are baked into the bundle.
 
-3. Install the dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+`EXPO_PUBLIC_DEV_SKIP_AUTH=true` lets you browse without an account; reporting, adding places,
+saving and booking stay disabled because they need a real signed-in user.
 
-4. Configure environment variables:
-   ```bash
-   cp .env.example .env
-   ```
-   Open `.env` and set:
-   ```env
-   DATABASE_URL="postgresql://postgres:[YOUR-PASSWORD]@[YOUR-DB-HOST]:5432/postgres"
-   PORT=8000
-   ENVIRONMENT=development
-   ```
-
-5. Start the FastAPI development server:
-   ```bash
-   uvicorn main:app --reload --port 8000
-   ```
-
-6. Verify the service:
-   - API Root: [http://127.0.0.1:8000](http://127.0.0.1:8000)
-   - Interactive Swagger Docs: [http://127.0.0.1:8000/docs](http://127.0.0.1:8000/docs)
+Checks:
+```bash
+npm test                              # unit tests (Jest)
+npm run typecheck                     # tsc --noEmit
+npx expo export --platform android    # the bundle actually builds
+```
 
 ---
 
-## 📊 3. Admin Dashboard (Streamlit)
+## Command summary
 
-The admin dashboard provides municipal authorities with a web interface to review and update reported civic problems.
-
-### Steps:
-1. Open a new terminal and navigate to the `admin-dashboard` folder:
-   ```bash
-   cd admin-dashboard
-   ```
-
-2. Activate your virtual environment (or create a new one):
-   - **Windows (PowerShell):**
-     ```powershell
-     python -m venv .venv
-     .\.venv\Scripts\activate
-     ```
-   - **macOS / Linux:**
-     ```bash
-     python3 -m venv .venv
-     source .venv/bin/activate
-     ```
-
-3. Install the dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. Configure environment variables:
-   ```bash
-   cp .env.example .env
-   ```
-   Fill in your Supabase connection parameters in `.env`:
-   ```env
-   SUPABASE_URL="https://your-project.supabase.co"
-   SUPABASE_KEY="your-supabase-service-or-anon-key"
-   DATABASE_URL="postgresql://postgres:[YOUR-PASSWORD]@[YOUR-DB-HOST]:5432/postgres"
-   ```
-
-5. Run the Streamlit dashboard:
-   ```bash
-   streamlit run app.py
-   ```
-
-6. Open your browser at [http://localhost:8501](http://localhost:8501).
-
----
-
-## 📱 4. Mobile Application (React Native / Expo)
-
-The mobile client is the primary application for community members to browse maps, get recommendations, and report civic issues. It was rebuilt in React Native (Expo managed workflow) — the previous Flutter implementation has been removed.
-
-### Steps:
-1. Ensure Node.js 18+ is installed:
-   ```bash
-   node -v
-   ```
-2. Navigate to the `mobile` folder and install dependencies:
-   ```bash
-   cd mobile
-   npm install
-   ```
-
-3. Configure environment variables:
-   - Copy `.env.example` to `.env` and fill it in.
-   - All keys are prefixed `EXPO_PUBLIC_` so Expo inlines them at build time.
-   - `EXPO_PUBLIC_RECOMMENDATIONS_URL` → `http://10.0.2.2:8000` for an Android emulator, `http://127.0.0.1:8000` for an iOS simulator, or your machine's LAN IP for a physical device.
-   - `EXPO_PUBLIC_MAP_TILE_URL` → a hosted OSM-style raster tile URL (Mapbox / MapTiler). **Do not use `tile.openstreetmap.org`** — `react-native-maps` blocks it on Android and the map will be blank there. See `mobile/README.md`.
-
-4. Start the dev server:
-   ```bash
-   npx expo start
-   ```
-   Then press `a` for an Android emulator, `i` for an iOS simulator, or scan the QR code with Expo Go. No `expo prebuild` is required.
-
-5. Useful checks:
-   ```bash
-   npm run typecheck                    # tsc --noEmit
-   npx expo export --platform android   # verify the bundle builds
-   ```
-
-> After editing `.env`, restart with `npx expo start --clear` — inlined values are baked into the bundle.
-
----
-
-## 🛠️ Summary of Common Commands
-
-| Service | Working Directory | Start Command | Default URL / Port |
-| :--- | :--- | :--- | :--- |
-| **Recommendation Service** | `/recommendation-service` | `uvicorn main:app --reload` | `http://127.0.0.1:8000` |
-| **Admin Dashboard** | `/admin-dashboard` | `streamlit run app.py` | `http://localhost:8501` |
-| **Mobile Client** | `/mobile` | `npx expo start` | Expo Go / Emulator |
-| **Supabase Local** | `/supabase` or root | `supabase start` | `http://127.0.0.1:54321` |
+| Component | Directory | Start | URL |
+| :-- | :-- | :-- | :-- |
+| Recommendation service | `recommendation-service/` | `uvicorn main:app --reload --port 8000` | <http://127.0.0.1:8000> |
+| Admin dashboard | `admin-dashboard/` | `streamlit run app.py` | <http://localhost:8501> |
+| Mobile app | `mobile/` | `npx expo start` | Expo Go / emulator |
